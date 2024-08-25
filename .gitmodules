@@ -1,0 +1,4 @@
+[submodule "src/Plugins/Nop.Plugin.Payments.SimplePay"]
+	path = src/Plugins/Nop.Plugin.Payments.SimplePay
+	url = https://github.com/tmsblzs/nopCommerce-simple-pay.git
+    branch = 1-setup-github-and-submodule
