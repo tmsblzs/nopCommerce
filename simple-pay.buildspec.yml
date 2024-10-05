@@ -4,6 +4,9 @@ phases:
     commands:
       - curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel LTS 
   build:
+    pre-build:
+        - git submodule update --init -recursive
+        
     commands:
       - dotnet restore src/NopCommerce.sln
       - dotnet build src/NopCommerce.sln
