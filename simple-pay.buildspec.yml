@@ -16,3 +16,7 @@ phases:
     commands:
       - dotnet restore src/NopCommerce.sln
       - dotnet build src/NopCommerce.sln
+
+artifacts:
+  files:
+    - 'src/Presentation/Nop.Web/Plugins/Payments.SimplePay/**/*'
