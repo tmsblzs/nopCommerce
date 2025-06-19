@@ -412,9 +412,9 @@ public partial class ProductService : IProductService
 
         var qty = -quantity;
 
-        var productInventory = _productWarehouseInventoryRepository.Table.Where(pwi => pwi.ProductId == product.Id)
+        var productInventory = await _productWarehouseInventoryRepository.Table.Where(pwi => pwi.ProductId == product.Id)
             .OrderByDescending(pwi => pwi.StockQuantity - pwi.ReservedQuantity)
-            .ToList();
+            .ToListAsync();
 
         if (productInventory.Count <= 0)
             return;
@@ -1164,20 +1164,19 @@ public partial class ProductService : IProductService
             }
         }
 
-        var products = await productsQuery.OrderBy(_localizedPropertyRepository, await _workContext.GetWorkingLanguageAsync(), orderBy).ToPagedListAsync(pageIndex, pageSize);
-
         if (providerResults.Any() && orderBy == ProductSortingEnum.Position && !showHidden)
         {
-            var sortedProducts = products.OrderBy(p => 
-            {
-                var index = providerResults.IndexOf(p.Id);
-                return index == -1 ? products.TotalCount : index;
-            }).ToList();
+            var sortedProducts = from p in productsQuery
+                                 join pr in providerResults.Select((id, ind) => new { ind, id }) on p.Id equals pr.id into orderSeq
+                                 from os in orderSeq.DefaultIfEmpty()
+                                 orderby os == null ? int.MaxValue : os.ind
+                                 select p;
+                                 
 
-            return new PagedList<Product>(sortedProducts, pageIndex, pageSize, products.TotalCount);
+            return await sortedProducts.ToPagedListAsync(pageIndex, pageSize);
         }
 
-        return products;
+        return await productsQuery.OrderBy(_localizedPropertyRepository, await _workContext.GetWorkingLanguageAsync(), orderBy).ToPagedListAsync(pageIndex, pageSize);
     }
 
     /// <summary>
@@ -1235,20 +1234,21 @@ public partial class ProductService : IProductService
             query = query.Where(p => p.VendorId == vendorId);
         }
 
+        //apply store mapping constraints
+        if (!showHidden && storeId > 0)
+            query = await _storeMappingService.ApplyStoreMapping(query, storeId);
+
+        if (!showHidden)
+        {
+            //apply ACL constraints
+            var customer = await _workContext.GetCurrentCustomerAsync();
+            query = await _aclService.ApplyAcl(query, customer);
+        }
+
         query = query.Where(x => !x.Deleted);
         query = query.OrderBy(x => x.DisplayOrder).ThenBy(x => x.Id);
 
-        var products = await query.ToListAsync();
-
-        //ACL mapping
-        if (!showHidden)
-            products = await products.WhereAwait(async x => await _aclService.AuthorizeAsync(x)).ToListAsync();
-
-        //Store mapping
-        if (!showHidden && storeId > 0)
-            products = await products.WhereAwait(async x => await _storeMappingService.AuthorizeAsync(x, storeId)).ToListAsync();
-
-        return products;
+        return await query.ToListAsync();
     }
 
     /// <summary>
@@ -2784,18 +2784,11 @@ public partial class ProductService : IProductService
     {
         ArgumentNullException.ThrowIfNull(discount);
 
-        var mappingsWithProducts =
-            from dcm in _discountProductMappingRepository.Table
-            join p in _productRepository.Table on dcm.EntityId equals p.Id
-            where dcm.DiscountId == discount.Id
-            select new { product = p, dcm };
+        var mappingsWithProducts = await _discountProductMappingRepository.Table
+            .Where(dpm => dpm.DiscountId == discount.Id)
+            .ToListAsync();
 
-        var mappingsToDelete = new List<DiscountProductMapping>();
-        await foreach (var pdcm in mappingsWithProducts.ToAsyncEnumerable())
-        {
-            mappingsToDelete.Add(pdcm.dcm);
-        }
-        await _discountProductMappingRepository.DeleteAsync(mappingsToDelete);
+        await _discountProductMappingRepository.DeleteAsync(mappingsWithProducts);
     }
 
     /// <summary>
