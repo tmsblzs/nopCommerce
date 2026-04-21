@@ -1,19 +1,16 @@
 ﻿using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Globalization;
-using System.Resources;
-using FluentAssertions;
+using AwesomeAssertions;
 using FluentMigrator;
 using FluentMigrator.Runner;
 using FluentMigrator.Runner.Conventions;
 using FluentMigrator.Runner.Generators;
 using FluentMigrator.Runner.Initialization;
-using FluentMigrator.Runner.Processors;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
-using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
@@ -33,11 +30,13 @@ using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Media;
 using Nop.Core.Events;
+using Nop.Core.Http;
 using Nop.Core.Infrastructure;
 using Nop.Data;
 using Nop.Data.Configuration;
 using Nop.Data.Migrations;
 using Nop.Services.Affiliates;
+using Nop.Services.ArtificialIntelligence;
 using Nop.Services.Attributes;
 using Nop.Services.Authentication.External;
 using Nop.Services.Authentication.MultiFactor;
@@ -52,7 +51,7 @@ using Nop.Services.Directory;
 using Nop.Services.Discounts;
 using Nop.Services.Events;
 using Nop.Services.ExportImport;
-using Nop.Services.Forums;
+using Nop.Services.FilterLevels;
 using Nop.Services.Gdpr;
 using Nop.Services.Helpers;
 using Nop.Services.Html;
@@ -60,12 +59,11 @@ using Nop.Services.Installation;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
 using Nop.Services.Media;
+using Nop.Services.Menus;
 using Nop.Services.Messages;
-using Nop.Services.News;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Plugins;
-using Nop.Services.Polls;
 using Nop.Services.ScheduleTasks;
 using Nop.Services.Security;
 using Nop.Services.Seo;
@@ -82,12 +80,15 @@ using Nop.Tests.Nop.Web.Tests.Public.Factories;
 using Nop.Web.Areas.Admin.Factories;
 using Nop.Web.Framework;
 using Nop.Web.Framework.Factories;
+using Nop.Web.Framework.Infrastructure.Extensions;
 using Nop.Web.Framework.Mvc.Routing;
+using Nop.Web.Framework.Security.Captcha;
 using Nop.Web.Framework.Themes;
 using Nop.Web.Framework.UI;
 using Nop.Web.Framework.WebOptimizer;
 using Nop.Web.Infrastructure.Installation;
 using SkiaSharp;
+using static Nop.Tests.Nop.Web.Tests.Admin.Factories.CommonModelFactoryTests;
 using IAuthenticationService = Nop.Services.Authentication.IAuthenticationService;
 using Task = System.Threading.Tasks.Task;
 
@@ -96,7 +97,6 @@ namespace Nop.Tests;
 public partial class BaseNopTest
 {
     private static readonly ServiceProvider _serviceProvider;
-    private static readonly ResourceManager _resourceManager;
 
     protected BaseNopTest()
     {
@@ -109,9 +109,9 @@ public partial class BaseNopTest
     {
         var dataProvider = _serviceProvider.GetService<IDataProviderManager>().DataProvider;
 
-        dataProvider.CreateDatabase(null);
+        dataProvider.CreateDatabase();
         dataProvider.InitializeDatabase();
-        
+
         var installationService = _serviceProvider.GetService<IInstallationService>();
 
         installationService.InstallAsync(
@@ -125,9 +125,13 @@ public partial class BaseNopTest
                 CultureInfo = new CultureInfo(NopCommonDefaults.DefaultLanguageCulture),
                 InstallSampleData = true
             }).Wait();
-        
+
         var permissionService = EngineContext.Current.Resolve<IPermissionService>();
         permissionService.InsertPermissionsAsync().Wait();
+
+        //init theme provider
+        var themeProvider = EngineContext.Current.Resolve<IThemeProvider>();
+        themeProvider.InitializeAsync().Wait();
     }
 
     protected static void PropertiesShouldEqual<T1, T2>(T1 obj1, T2 obj2, params string[] filter)
@@ -156,7 +160,6 @@ public partial class BaseNopTest
 
     static BaseNopTest()
     {
-        _resourceManager = Connections.ResourceManager;
         SetDataProviderType(DataProviderType.Unknown);
 
         TypeDescriptor.AddAttributes(typeof(List<int>),
@@ -165,6 +168,7 @@ public partial class BaseNopTest
             new TypeConverterAttribute(typeof(GenericListTypeConverter<string>)));
 
         var services = new ServiceCollection();
+        services.AddSingleton<IServiceCollection>(services);
 
         var rootPath =
             new DirectoryInfo(
@@ -186,7 +190,20 @@ public partial class BaseNopTest
         services.AddTransient<INopFileProvider, NopFileProvider>();
         CommonHelper.DefaultFileProvider = new NopFileProvider(webHostEnvironment.Object);
 
-        services.AddHttpClient();
+        //default client
+        services.AddHttpClient(NopHttpDefaults.DefaultHttpClient).WithProxy();
+
+        //client to request current store
+        services.AddHttpClient<StoreHttpClient>();
+
+        //client to request nopCommerce official site
+        services.AddHttpClient<NopHttpClient>().WithProxy();
+
+        //client to request reCAPTCHA service
+        services.AddHttpClient<CaptchaHttpClient>().WithProxy();
+
+        //client to request artificial intelligence service
+        services.AddHttpClient<ArtificialIntelligenceHttpClient>().WithProxy();
 
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var typeFinder = new WebAppTypeFinder();
@@ -216,33 +233,30 @@ public partial class BaseNopTest
         var httpContext = new DefaultHttpContext();
         httpContext.Request.Headers.Append(HeaderNames.Host, NopTestsDefaults.HostIpAddress);
         httpContext.Session = new TestSeesion();
+        
+        var actionContext = new ActionContext(httpContext, httpContext.GetRouteData(), new ActionDescriptor());
 
         var httpContextAccessor = new Mock<IHttpContextAccessor>();
         httpContextAccessor.Setup(p => p.HttpContext).Returns(httpContext);
 
         services.AddSingleton(httpContextAccessor.Object);
-
-        var actionContextAccessor = new Mock<IActionContextAccessor>();
-        actionContextAccessor.Setup(x => x.ActionContext)
-            .Returns(new ActionContext(httpContext, httpContext.GetRouteData(), new ActionDescriptor()));
-
-        services.AddSingleton(actionContextAccessor.Object);
-
+        
         var urlHelperFactory = new Mock<IUrlHelperFactory>();
-        var urlHelper = new NopTestUrlHelper(actionContextAccessor.Object.ActionContext);
+        var urlHelper = new NopTestUrlHelper(actionContext);
 
         urlHelperFactory.Setup(x => x.GetUrlHelper(It.IsAny<ActionContext>()))
             .Returns(urlHelper);
 
-        services.AddTransient(_ => actionContextAccessor.Object);
-
         services.AddSingleton(urlHelperFactory.Object);
 
         var tempDataDictionaryFactory = new Mock<ITempDataDictionaryFactory>();
-        var dataDictionary = new TempDataDictionary(httpContextAccessor.Object.HttpContext,
-            new Mock<ITempDataProvider>().Object);
+        var dataDictionary = new TempDataDictionary(httpContext, new Mock<ITempDataProvider>().Object);
         tempDataDictionaryFactory.Setup(f => f.GetTempData(It.IsAny<HttpContext>())).Returns(dataDictionary);
         services.AddSingleton(tempDataDictionaryFactory.Object);
+
+        var linkGenerator = new Mock<LinkGenerator>();
+
+        services.AddSingleton(linkGenerator.Object);
 
         services.AddSingleton<ITypeFinder>(typeFinder);
         Singleton<ITypeFinder>.Instance = typeFinder;
@@ -282,6 +296,7 @@ public partial class BaseNopTest
         //services
         services.AddTransient<IBackInStockSubscriptionService, BackInStockSubscriptionService>();
         services.AddTransient<ICategoryService, CategoryService>();
+        services.AddTransient<IFilterLevelValueService, FilterLevelValueService>();
         services.AddTransient<ICompareProductsService, CompareProductsService>();
         services.AddTransient<IRecentlyViewedProductsService, RecentlyViewedProductsService>();
         services.AddTransient<IManufacturerService, ManufacturerService>();
@@ -290,6 +305,7 @@ public partial class BaseNopTest
         services.AddTransient<IProductAttributeParser, ProductAttributeParser>();
         services.AddTransient<IProductAttributeService, ProductAttributeService>();
         services.AddTransient<IProductService, ProductService>();
+        services.AddTransient<IProductReviewService, ProductReviewService>();
         services.AddTransient<ICopyProductService, CopyProductService>();
         services.AddTransient<ISpecificationAttributeService, SpecificationAttributeService>();
         services.AddTransient<IProductTemplateService, ProductTemplateService>();
@@ -299,6 +315,7 @@ public partial class BaseNopTest
         services.AddTransient<IProductTagService, ProductTagService>();
         services.AddTransient<IAddressService, AddressService>();
         services.AddTransient<IAffiliateService, AffiliateService>();
+        services.AddTransient<IArtificialIntelligenceService, ArtificialIntelligenceService>();
         services.AddTransient<IVendorService, VendorService>();
 
         //attribute services
@@ -330,10 +347,12 @@ public partial class BaseNopTest
         services.AddTransient<ILocalizationService, LocalizationService>();
         services.AddTransient<ILocalizedEntityService, LocalizedEntityService>();
         services.AddTransient(typeof(Lazy<ILocalizationService>));
+        services.AddTransient<ITranslationModelFactory, TranslationModelFactory>();
         services.AddTransient<IInstallationLocalizationService, InstallationLocalizationService>();
         services.AddTransient<ILanguageService, LanguageService>();
         services.AddTransient<IDownloadService, DownloadService>();
         services.AddTransient<IMessageTemplateService, MessageTemplateService>();
+        services.AddScoped<IMenuService, MenuService>();
         services.AddTransient<IQueuedEmailService, QueuedEmailService>();
         services.AddTransient<INewsLetterSubscriptionService, NewsLetterSubscriptionService>();
         services.AddTransient<INewsLetterSubscriptionTypeService, NewsLetterSubscriptionTypeService>();
@@ -354,6 +373,7 @@ public partial class BaseNopTest
         services.AddTransient<IReturnRequestService, ReturnRequestService>();
         services.AddTransient<IRewardPointService, RewardPointService>();
         services.AddTransient<IShoppingCartService, ShoppingCartService>();
+        services.AddTransient<ICustomWishlistService, CustomWishlistService>();
         services.AddTransient<ICustomNumberFormatter, CustomNumberFormatter>();
         services.AddTransient<IPaymentService, PaymentService>();
         services.AddTransient<IEncryptionService, EncryptionService>();
@@ -361,30 +381,28 @@ public partial class BaseNopTest
         services.AddTransient<IUrlRecordService, UrlRecordService>();
         services.AddTransient<IShipmentService, ShipmentService>();
         services.AddTransient<IShippingService, ShippingService>();
+        services.AddTransient<IWarehouseService, WarehouseService>();
+        services.AddTransient<IShippingMethodsService, ShippingMethodsService>();
         services.AddTransient<IDateRangeService, DateRangeService>();
         services.AddTransient<ITaxCategoryService, TaxCategoryService>();
         services.AddTransient<ICheckVatService, CheckVatService>();
         services.AddTransient<ITaxService, TaxService>();
         services.AddTransient<ILogger, DefaultLogger>();
         services.AddTransient<ICustomerActivityService, CustomerActivityService>();
-        services.AddTransient<IForumService, ForumService>();
         services.AddTransient<IGdprService, GdprService>();
-        services.AddTransient<IPollService, PollService>();
         services.AddTransient<IBlogService, BlogService>();
         services.AddTransient<ITopicService, TopicService>();
-        services.AddTransient<INewsService, NewsService>();
         services.AddTransient<IDateTimeHelper, DateTimeHelper>();
         services.AddTransient<IScheduleTaskService, ScheduleTaskService>();
         services.AddTransient<IExportManager, ExportManager>();
         services.AddTransient<IImportManager, ImportManager>();
         services.AddTransient<IPdfService, PdfService>();
         services.AddTransient<IUploadService, UploadService>();
-        services.AddTransient<IThemeProvider, ThemeProvider>();
+        services.AddSingleton<IThemeProvider, ThemeProvider>();
         services.AddTransient<IExternalAuthenticationService, ExternalAuthenticationService>();
-        services.AddScoped<IBBCodeHelper, BBCodeHelper>();
         services.AddScoped<IHtmlFormatter, HtmlFormatter>();
-
         services.AddScoped<INopAssetHelper, NopAssetHelper>();
+        services.AddScoped<ISyncCodeHelper, SyncCodeHelper>();
 
         //slug route transformer
         services.AddSingleton<IReviewTypeService, ReviewTypeService>();
@@ -426,9 +444,7 @@ public partial class BaseNopTest
         {
             var interfaces = consumer.FindInterfaces((type, criteria) => type.IsGenericType && ((Type)criteria).IsAssignableFrom(type.GetGenericTypeDefinition()), typeof(IConsumer<>));
             foreach (var findInterface in interfaces)
-            {
                 services.AddTransient(findInterface, consumer);
-            }
         }
 
         services.AddSingleton<IInstallationService, InstallationService>();
@@ -437,22 +453,21 @@ public partial class BaseNopTest
         services
             // add common FluentMigrator services
             .AddFluentMigratorCore()
-            .AddScoped<IProcessorAccessor, TestProcessorAccessor>()
             // set accessor for the connection string
             .AddScoped<IConnectionStringAccessor>(_ => DataSettingsManager.LoadSettings())
             .AddScoped<IMigrationManager, MigrationManager>()
             .AddScoped<Lazy<IMigrationManager>>()
             .AddSingleton<IConventionSet, NopTestConventionSet>()
             .ConfigureRunner(rb =>
-                rb.WithVersionTable(new MigrationVersionInfo()).AddSqlServer().AddMySql5().AddPostgres().AddSQLite()
+                rb.WithVersionTable(new MigrationVersionInfo()).AddSQLite()
                     // define the assembly containing the migrations
                     .ScanIn(mAssemblies).For.Migrations());
 
         services.AddOptions<GeneratorOptions>().Configure(go => go.CompatibilityMode = CompatibilityMode.LOOSE);
 
-        services.AddTransient<IStoreContext, WebStoreContext>();
+        services.AddScoped<IStoreContext, WebStoreContext>();
         services.AddTransient<Lazy<IStoreContext>>();
-        services.AddTransient<IWorkContext, WebWorkContext>();
+        services.AddScoped<IWorkContext, WebWorkContext>();
         services.AddTransient<Lazy<IWorkContext>>();
         services.AddTransient<IThemeContext, ThemeContext>();
         services.AddTransient<Lazy<ILocalizationService>>();
@@ -480,7 +495,7 @@ public partial class BaseNopTest
         services.AddTransient<ICampaignModelFactory, CampaignModelFactory>();
         services.AddTransient<ICategoryModelFactory, CategoryModelFactory>();
         services.AddTransient<ICheckoutAttributeModelFactory, CheckoutAttributeModelFactory>();
-        services.AddTransient<ICommonModelFactory, CommonModelFactory>();
+        services.AddTransient<ICommonModelFactory, TestCommonModelFactory>();
         services.AddTransient<ICountryModelFactory, CountryModelFactory>();
         services.AddTransient<ICurrencyModelFactory, CurrencyModelFactory>();
         services.AddTransient<ICustomerAttributeModelFactory, CustomerAttributeModelFactory>();
@@ -488,9 +503,7 @@ public partial class BaseNopTest
         services.AddTransient<ICustomerRoleModelFactory, CustomerRoleModelFactory>();
         services.AddTransient<IDiscountModelFactory, DiscountModelFactory>();
         services.AddTransient<IEmailAccountModelFactory, EmailAccountModelFactory>();
-        services
-            .AddTransient<IExternalAuthenticationMethodModelFactory, ExternalAuthenticationMethodModelFactory>();
-        services.AddTransient<IForumModelFactory, ForumModelFactory>();
+        services.AddTransient<IExternalAuthenticationMethodModelFactory, ExternalAuthenticationMethodModelFactory>();
         services.AddTransient<IGiftCardModelFactory, GiftCardModelFactory>();
         services.AddTransient<IHomeModelFactory, HomeModelFactory>();
         services.AddTransient<ILanguageModelFactory, LanguageModelFactory>();
@@ -498,12 +511,9 @@ public partial class BaseNopTest
         services.AddTransient<IManufacturerModelFactory, ManufacturerModelFactory>();
         services.AddTransient<IMeasureModelFactory, MeasureModelFactory>();
         services.AddTransient<IMessageTemplateModelFactory, MessageTemplateModelFactory>();
-        services.AddTransient<INewsLetterSubscriptionModelFactory, NewsLetterSubscriptionModelFactory>();
-        services.AddTransient<INewsModelFactory, NewsModelFactory>();
         services.AddTransient<IOrderModelFactory, OrderModelFactory>();
         services.AddTransient<IPaymentModelFactory, PaymentModelFactory>();
         services.AddTransient<IPluginModelFactory, PluginModelFactory>();
-        services.AddTransient<IPollModelFactory, PollModelFactory>();
         services.AddTransient<IProductModelFactory, ProductModelFactory>();
         services.AddTransient<ProductModelFactoryTests.ProductModelFactoryForTest>();
         services.AddTransient<IProductAttributeModelFactory, ProductAttributeModelFactory>();
@@ -535,15 +545,10 @@ public partial class BaseNopTest
         services.AddTransient<Web.Factories.ICommonModelFactory, Web.Factories.CommonModelFactory>();
         services.AddTransient<Web.Factories.ICountryModelFactory, Web.Factories.CountryModelFactory>();
         services.AddTransient<Web.Factories.ICustomerModelFactory, Web.Factories.CustomerModelFactory>();
-        services.AddTransient<Web.Factories.IForumModelFactory, Web.Factories.ForumModelFactory>();
-        services
-            .AddTransient<Web.Factories.IExternalAuthenticationModelFactory,
-                Web.Factories.ExternalAuthenticationModelFactory>();
+        services.AddTransient<Web.Factories.IExternalAuthenticationModelFactory, Web.Factories.ExternalAuthenticationModelFactory>();
         services.AddTransient<Web.Factories.IJsonLdModelFactory, Web.Factories.JsonLdModelFactory>();
-        services.AddTransient<Web.Factories.INewsModelFactory, Web.Factories.NewsModelFactory>();
         services.AddTransient<Web.Factories.INewsLetterModelFactory, Web.Factories.NewsLetterModelFactory>();
         services.AddTransient<Web.Factories.IOrderModelFactory, Web.Factories.OrderModelFactory>();
-        services.AddTransient<Web.Factories.IPollModelFactory, Web.Factories.PollModelFactory>();
         services
             .AddTransient<Web.Factories.IPrivateMessagesModelFactory, Web.Factories.PrivateMessagesModelFactory>();
         services.AddTransient<Web.Factories.IProductModelFactory, Web.Factories.ProductModelFactory>();
@@ -578,29 +583,22 @@ public partial class BaseNopTest
         dataConfig.DataProvider = type;
         dataConfig.ConnectionString = string.Empty;
 
-        try
+        switch (type)
         {
-            switch (type)
-            {
-                case DataProviderType.SqlServer:
-                    dataConfig.ConnectionString = _resourceManager.GetString("sql server connection string");
-                    break;
-                case DataProviderType.MySql:
-                    dataConfig.ConnectionString = _resourceManager.GetString("MySql server connection string");
-                    break;
-                case DataProviderType.PostgreSQL:
-                    dataConfig.ConnectionString = _resourceManager.GetString("PostgreSql server connection string");
-                    break;
-                case DataProviderType.Unknown:
-                    dataConfig.ConnectionString = "Data Source=nopCommerceTest.sqlite;Mode=Memory;Cache=Shared";
-                    break;
-            }
+            case DataProviderType.SqlServer:
+                dataConfig.ConnectionString = NopTestConfiguration.SqlServerConnectionString;
+                break;
+            case DataProviderType.MySql:
+                dataConfig.ConnectionString = NopTestConfiguration.MySqlServerConnectionString;
+                break;
+            case DataProviderType.PostgreSQL:
+                dataConfig.ConnectionString = NopTestConfiguration.PostgreSqlServerConnectionString;
+                break;
+            case DataProviderType.Unknown:
+                dataConfig.ConnectionString = NopTestConfiguration.SqliteConnectionString;
+                break;
         }
-        catch (MissingManifestResourceException)
-        {
-            //ignore
-        }
-
+       
         Singleton<DataConfig>.Instance = dataConfig;
         var flag = !string.IsNullOrEmpty(dataConfig.ConnectionString);
 

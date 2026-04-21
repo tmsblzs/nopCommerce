@@ -2,23 +2,25 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml;
 using Nop.Core;
 using Nop.Core.Configuration;
 using Nop.Core.Domain;
+using Nop.Core.Domain.ArtificialIntelligence;
 using Nop.Core.Domain.Blogs;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Configuration;
 using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Directory;
-using Nop.Core.Domain.Forums;
+using Nop.Core.Domain.FilterLevels;
 using Nop.Core.Domain.Gdpr;
 using Nop.Core.Domain.Localization;
 using Nop.Core.Domain.Logging;
 using Nop.Core.Domain.Media;
+using Nop.Core.Domain.Menus;
 using Nop.Core.Domain.Messages;
-using Nop.Core.Domain.News;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Core.Domain.ScheduleTasks;
@@ -28,13 +30,16 @@ using Nop.Core.Domain.Shipping;
 using Nop.Core.Domain.Stores;
 using Nop.Core.Domain.Tax;
 using Nop.Core.Domain.Topics;
+using Nop.Core.Domain.Translation;
 using Nop.Core.Domain.Vendors;
 using Nop.Core.Http;
 using Nop.Core.Security;
+using Nop.Services.ArtificialIntelligence;
 using Nop.Services.Catalog;
 using Nop.Services.Common;
 using Nop.Services.Customers;
 using Nop.Services.Helpers;
+using Nop.Services.Media;
 using Nop.Services.Messages;
 using Nop.Services.Seo;
 
@@ -177,44 +182,24 @@ public partial class InstallationService
     /// <returns>A task that represents the asynchronous operation</returns>
     protected virtual async Task ImportResourcesFromXmlAsync(Language language, StreamReader xmlStreamReader, bool updateExistingResources = true)
     {
-        HashSet<(string name, string value)> loadLocaleResourcesFromStream()
-        {
-            var result = new HashSet<(string name, string value)>();
-
-            using var xmlReader = XmlReader.Create(xmlStreamReader);
-            while (xmlReader.ReadToFollowing("Language"))
-            {
-                if (xmlReader.NodeType != XmlNodeType.Element)
-                    continue;
-
-                using var languageReader = xmlReader.ReadSubtree();
-                while (languageReader.ReadToFollowing("LocaleResource"))
-                    if (xmlReader.NodeType == XmlNodeType.Element && xmlReader.GetAttribute("Name") is { } name)
-                    {
-                        using var lrReader = languageReader.ReadSubtree();
-                        if (lrReader.ReadToFollowing("Value") && lrReader.NodeType == XmlNodeType.Element)
-                            result.Add((name.ToLowerInvariant(), lrReader.ReadString()));
-                    }
-
-                break;
-            }
-
-            return result;
-        }
-
-        if (xmlStreamReader.EndOfStream)
+        var parsedResources = loadLocaleResourcesFromStream();
+        
+        if (!parsedResources.Any())
             return;
 
         var lsNamesList = new Dictionary<string, LocaleStringResource>();
 
         foreach (var localeStringResource in Table<LocaleStringResource>().Where(lsr => lsr.LanguageId == language.Id)
                      .OrderBy(lsr => lsr.Id))
+        {
             lsNamesList[localeStringResource.ResourceName.ToLowerInvariant()] = localeStringResource;
+        }
 
         var lrsToUpdateList = new List<LocaleStringResource>();
         var lrsToInsertList = new Dictionary<string, LocaleStringResource>();
 
-        foreach (var (name, value) in loadLocaleResourcesFromStream())
+        foreach (var (name, value) in parsedResources)
+        {
             if (lsNamesList.TryGetValue(name, out var localString))
             {
                 if (!updateExistingResources)
@@ -224,15 +209,57 @@ public partial class InstallationService
                 lrsToUpdateList.Add(localString);
             }
             else
+            {
                 lrsToInsertList[name] = new LocaleStringResource
                 {
                     LanguageId = language.Id,
                     ResourceName = name,
                     ResourceValue = value
                 };
+            }
+        }
 
-        await _dataProvider.UpdateEntitiesAsync(lrsToUpdateList);
-        await _dataProvider.BulkInsertEntitiesAsync(lrsToInsertList.Values);
+        if (lrsToUpdateList.Any())
+            await _dataProvider.UpdateEntitiesAsync(lrsToUpdateList);
+
+        if (lrsToInsertList.Any())
+            await _dataProvider.BulkInsertEntitiesAsync(lrsToInsertList.Values);
+
+        return;
+
+        HashSet<(string name, string value)> loadLocaleResourcesFromStream()
+        {
+            var result = new HashSet<(string name, string value)>();
+
+            try
+            {
+                using var xmlReader = XmlReader.Create(xmlStreamReader);
+                while (xmlReader.ReadToFollowing("Language"))
+                {
+                    if (xmlReader.NodeType != XmlNodeType.Element)
+                        continue;
+
+                    using var languageReader = xmlReader.ReadSubtree();
+                    while (languageReader.ReadToFollowing("LocaleResource"))
+                    {
+                        if (xmlReader.NodeType != XmlNodeType.Element || xmlReader.GetAttribute("Name") is not { } name)
+                            continue;
+
+                        using var lrReader = languageReader.ReadSubtree();
+                        if (lrReader.ReadToFollowing("Value") && lrReader.NodeType == XmlNodeType.Element)
+                            result.Add((name.ToLowerInvariant(), lrReader.ReadString()));
+                    }
+
+                    break;
+                }
+            }
+            catch (XmlException)
+            {
+                //ignore
+            }
+
+            return result;
+        }
     }
 
     /// <summary>
@@ -247,9 +274,9 @@ public partial class InstallationService
     {
         var count = 0;
         using var reader = new StreamReader(stream);
-        while (!reader.EndOfStream)
+        string line;
+        while ((line = await reader.ReadLineAsync()) != null)
         {
-            var line = await reader.ReadLineAsync();
             if (string.IsNullOrWhiteSpace(line))
                 continue;
             var tmp = line.Split(',');
@@ -312,9 +339,13 @@ public partial class InstallationService
     protected virtual async Task InstallLanguagesAsync()
     {
         var defaultCulture = new CultureInfo(NopCommonDefaults.DefaultLanguageCulture);
+        var re = new Regex(" \\(.*\\)", RegexOptions.Compiled);
+        var languageName = re.Replace(defaultCulture.NativeName, string.Empty);
+        languageName = languageName[0].ToString().ToUpper() + languageName[1..];
+
         var defaultLanguage = new Language
         {
-            Name = defaultCulture.TwoLetterISOLanguageName.ToUpperInvariant(),
+            Name = languageName,
             LanguageCulture = defaultCulture.Name,
             UniqueSeoCode = defaultCulture.TwoLetterISOLanguageName,
             FlagImageFileName = $"{defaultCulture.Name.ToLowerInvariant()[^2..]}.png",
@@ -339,9 +370,12 @@ public partial class InstallationService
         if (cultureInfo == null || regionInfo == null || cultureInfo.Name == NopCommonDefaults.DefaultLanguageCulture)
             return;
 
+        languageName = re.Replace(cultureInfo.NativeName, string.Empty);
+        languageName = languageName[0].ToString().ToUpper() + languageName[1..];
+
         var language = new Language
         {
-            Name = cultureInfo.TwoLetterISOLanguageName.ToUpperInvariant(),
+            Name = languageName,
             LanguageCulture = cultureInfo.Name,
             UniqueSeoCode = cultureInfo.TwoLetterISOLanguageName,
             FlagImageFileName = $"{regionInfo.TwoLetterISORegionName.ToLowerInvariant()}.png",
@@ -755,20 +789,6 @@ public partial class InstallationService
                     EmailAccountId = eaGeneral.Id
                 },
                 new() {
-                    Name = MessageTemplateSystemNames.NEW_FORUM_POST_MESSAGE,
-                    Subject = "%Store.Name%. New Post Notification.",
-                    Body = $"<p>{Environment.NewLine}<a href=\"%Store.URL%\">%Store.Name%</a>{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}A new post has been created in the topic <a href=\"%Forums.TopicURL%\">\"%Forums.TopicName%\"</a> at <a href=\"%Forums.ForumURL%\">\"%Forums.ForumName%\"</a> forum.{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Click <a href=\"%Forums.TopicURL%\">here</a> for more info.{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Post author: %Forums.PostAuthor%{Environment.NewLine}<br />{Environment.NewLine}Post body: %Forums.PostBody%{Environment.NewLine}</p>{Environment.NewLine}",
-                    IsActive = true,
-                    EmailAccountId = eaGeneral.Id
-                },
-                new() {
-                    Name = MessageTemplateSystemNames.NEW_FORUM_TOPIC_MESSAGE,
-                    Subject = "%Store.Name%. New Topic Notification.",
-                    Body = $"<p>{Environment.NewLine}<a href=\"%Store.URL%\">%Store.Name%</a>{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}A new topic <a href=\"%Forums.TopicURL%\">\"%Forums.TopicName%\"</a> has been created at <a href=\"%Forums.ForumURL%\">\"%Forums.ForumName%\"</a> forum.{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Click <a href=\"%Forums.TopicURL%\">here</a> for more info.{Environment.NewLine}</p>{Environment.NewLine}",
-                    IsActive = true,
-                    EmailAccountId = eaGeneral.Id
-                },
-                new() {
                     Name = MessageTemplateSystemNames.GIFT_CARD_NOTIFICATION,
                     Subject = "%GiftCard.SenderName% has sent you a gift card for %Store.Name%",
                     Body = $"<p>{Environment.NewLine}You have received a gift card for %Store.Name%{Environment.NewLine}</p>{Environment.NewLine}<p>{Environment.NewLine}Dear %GiftCard.RecipientName%,{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}%GiftCard.SenderName% (%GiftCard.SenderEmail%) has sent you a %GiftCard.Amount% gift card for <a href=\"%Store.URL%\"> %Store.Name%</a>{Environment.NewLine}</p>{Environment.NewLine}<p>{Environment.NewLine}Your gift card code is %GiftCard.CouponCode%{Environment.NewLine}</p>{Environment.NewLine}<p>{Environment.NewLine}%GiftCard.Message%{Environment.NewLine}</p>{Environment.NewLine}",
@@ -805,13 +825,6 @@ public partial class InstallationService
                     EmailAccountId = eaGeneral.Id
                 },
                 new() {
-                    Name = MessageTemplateSystemNames.NEWS_COMMENT_STORE_OWNER_NOTIFICATION,
-                    Subject = "%Store.Name%. New news comment.",
-                    Body = $"<p>{Environment.NewLine}<a href=\"%Store.URL%\">%Store.Name%</a>{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}A new news comment has been created for news \"%NewsComment.NewsTitle%\".{Environment.NewLine}</p>{Environment.NewLine}",
-                    IsActive = true,
-                    EmailAccountId = eaGeneral.Id
-                },
-                new() {
                     Name = MessageTemplateSystemNames.NEWSLETTER_SUBSCRIPTION_ACTIVATION_MESSAGE,
                     Subject = "%Store.Name%. Subscription activation message.",
                     Body = $"<p>{Environment.NewLine}<a href=\"%NewsLetterSubscription.ActivationUrl%\">Click here to confirm your subscription to our list.</a>{Environment.NewLine}</p>{Environment.NewLine}<p>{Environment.NewLine}If you received this email by mistake, simply delete it.{Environment.NewLine}</p>{Environment.NewLine}",
@@ -836,6 +849,13 @@ public partial class InstallationService
                     Name = MessageTemplateSystemNames.ORDER_CANCELLED_CUSTOMER_NOTIFICATION,
                     Subject = "%Store.Name%. Your order cancelled",
                     Body = $"<p>{Environment.NewLine}<a href=\"%Store.URL%\">%Store.Name%</a>{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Hello %Order.CustomerFullName%,{Environment.NewLine}<br />{Environment.NewLine}Your order has been cancelled. Below is the summary of the order.{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Order Number: %Order.OrderNumber%{Environment.NewLine}<br />{Environment.NewLine}Order Details: <a target=\"_blank\" href=\"%Order.OrderURLForCustomer%\">%Order.OrderURLForCustomer%</a>{Environment.NewLine}<br />{Environment.NewLine}Date Ordered: %Order.CreatedOn%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Billing Address{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingFirstName% %Order.BillingLastName%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingAddress1%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingAddress2%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingCity% %Order.BillingZipPostalCode%{Environment.NewLine}<br />{Environment.NewLine}%Order.BillingStateProvince% %Order.BillingCountry%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}%if (%Order.Shippable%) Shipping Address{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingFirstName% %Order.ShippingLastName%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingAddress1%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingAddress2%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingCity% %Order.ShippingZipPostalCode%{Environment.NewLine}<br />{Environment.NewLine}%Order.ShippingStateProvince% %Order.ShippingCountry%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Shipping Method: %Order.ShippingMethod%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine} endif% %Order.Product(s)%{Environment.NewLine}</p>{Environment.NewLine}",
+                    IsActive = true,
+                    EmailAccountId = eaGeneral.Id
+                },
+                new() {
+                    Name = MessageTemplateSystemNames.ORDER_CANCELLED_STORE_OWNER_NOTIFICATION,
+                    Subject = "%Store.Name%. Order #%Order.OrderNumber% cancelled",
+                    Body = $"<p>{Environment.NewLine}<a href=\"%Store.URL%\">%Store.Name%</a>{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Order #%Order.OrderNumber% has been cancelled by customer.{Environment.NewLine}<br />{Environment.NewLine}Customer: %Order.CustomerFullName%,{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}Order Number: %Order.OrderNumber%{Environment.NewLine}<br />{Environment.NewLine}Date Ordered: %Order.CreatedOn%{Environment.NewLine}<br />{Environment.NewLine}<br />{Environment.NewLine}%Order.Product(s)%{Environment.NewLine}</p>{Environment.NewLine}",
                     IsActive = true,
                     EmailAccountId = eaGeneral.Id
                 },
@@ -1229,10 +1249,12 @@ public partial class InstallationService
             };
             if (!dictionary.TryGetValue(resourceName, out var value))
                 //first setting
+            {
                 dictionary.Add(resourceName, new List<Setting>
                 {
                     settingForCaching
                 });
+            }
             else
                 //already added
                 //most probably it's the setting with the same name but for some certain store (storeId > 0)
@@ -1261,7 +1283,6 @@ public partial class InstallationService
             SitemapIncludeProducts = false,
             SitemapIncludeProductTags = false,
             SitemapIncludeBlogPosts = true,
-            SitemapIncludeNews = false,
             SitemapIncludeTopics = true
         });
 
@@ -1271,7 +1292,6 @@ public partial class InstallationService
             SitemapXmlIncludeBlogPosts = true,
             SitemapXmlIncludeCategories = true,
             SitemapXmlIncludeManufacturers = true,
-            SitemapXmlIncludeNews = true,
             SitemapXmlIncludeProducts = true,
             SitemapXmlIncludeProductTags = true,
             SitemapXmlIncludeCustomUrls = true,
@@ -1283,10 +1303,10 @@ public partial class InstallationService
         await SaveSettingAsync(dictionary, new CommonSettings
         {
             UseSystemEmailForContactUsForm = true,
+            SubjectFieldOnContactUsForm = false,
             DisplayJavaScriptDisabledWarning = false,
             Log404Errors = true,
             BreadcrumbDelimiter = "/",
-            BbcodeEditorOpenLinksInNewWindow = false,
             PopupForTermsOfServiceLinks = true,
             JqueryMigrateScriptLoggingActive = false,
             UseResponseCompression = true,
@@ -1322,9 +1342,13 @@ public partial class InstallationService
             PopupGridPageSize = 7,
             GridPageSizes = "7, 15, 20, 50, 100",
             RichEditorAdditionalSettings = null,
+            RichEditorAllowJavaScript = false,
             UseRichEditorForCustomerEmails = false,
             UseRichEditorInMessageTemplates = false,
+            HideAdvertisementsOnAdminArea = false,
             CheckLicense = true,
+            LastNewsTitleAdminArea = string.Empty,
+            LicenseTerms = string.Empty,
             UseIsoDateFormatInJsonResult = true,
             ShowDocumentationReferenceLinks = true,
             UseStickyHeaderLayout = false,
@@ -1337,6 +1361,7 @@ public partial class InstallationService
             Dimensions = true,
             ProductAttributes = true,
             SpecificationAttributes = true,
+            FilterLevelValuesProducts = true,
             PAngV = isGermany
         });
 
@@ -1448,7 +1473,6 @@ public partial class InstallationService
             ExportImportRelatedEntitiesByName = true,
             ExportImportCategoryUseLimitedToStores = false,
             CountDisplayedYearsDatePicker = 1,
-            UseAjaxLoadMenu = false,
             UseAjaxCatalogProductsLoading = true,
             EnableManufacturerFiltering = true,
             EnablePriceRangeFiltering = true,
@@ -1460,7 +1484,28 @@ public partial class InstallationService
             DisplayAllPicturesOnCatalogPages = false,
             ProductUrlStructureTypeId = (int)ProductUrlStructureType.Product,
             ActiveSearchProviderSystemName = string.Empty,
-            UseStandardSearchWhenSearchProviderThrowsException = true
+            UseStandardSearchWhenSearchProviderThrowsException = true,
+            ShowSearchTermHistory = true,
+            NumberOfSearchTermHistoryItems = 10
+        });
+
+        await SaveSettingAsync(dictionary, new ArtificialIntelligenceSettings
+        {
+            Enabled = false,
+            ChatGptApiKey = string.Empty,
+            DeepSeekApiKey = string.Empty,
+            GeminiApiKey = string.Empty,
+            ProviderType = ArtificialIntelligenceProviderType.Gemini,
+            RequestTimeout = ArtificialIntelligenceDefaults.RequestTimeout,
+            AllowProductDescriptionGeneration = true,
+            ProductDescriptionQuery = ArtificialIntelligenceDefaults.ProductDescriptionQuery,
+            AllowMetaTitleGeneration = true,
+            MetaTitleQuery = ArtificialIntelligenceDefaults.MetaTitleQuery,
+            AllowMetaKeywordsGeneration = true,
+            MetaKeywordsQuery = ArtificialIntelligenceDefaults.MetaKeywordsQuery,
+            AllowMetaDescriptionGeneration = true,
+            MetaDescriptionQuery = ArtificialIntelligenceDefaults.MetaDescriptionQuery,
+            LogRequests = false
         });
 
         await SaveSettingAsync(dictionary, new LocalizationSettings
@@ -1473,6 +1518,16 @@ public partial class InstallationService
             LoadAllLocalizedPropertiesOnStartup = true,
             LoadAllUrlRecordsOnStartup = false,
             IgnoreRtlPropertyForAdminArea = false
+        });
+
+        await SaveSettingAsync(dictionary, new TranslationSettings
+        {
+            TranslateFromLanguageId = (await Table<Language>().FirstAsync()).Id,
+            AllowPreTranslate = false,
+            GoogleApiKey = string.Empty,
+            NotTranslateLanguages = new List<int>(),
+            DeepLAuthKey = string.Empty,
+            TranslationServiceId = (int)TranslationServiceType.GoogleTranslate
         });
 
         await SaveSettingAsync(dictionary, new CustomerSettings
@@ -1545,7 +1600,17 @@ public partial class InstallationService
             PhoneNumberValidationEnabled = false,
             PhoneNumberValidationUseRegex = false,
             PhoneNumberValidationRule = "^[0-9]{1,14}?$",
-            DefaultCountryId = await GetFirstEntityIdAsync<Country>(c => c.ThreeLetterIsoCode == _installationSettings.RegionInfo.ThreeLetterISORegionName)
+            DefaultCountryId = await GetFirstEntityIdAsync<Country>(c => c.ThreeLetterIsoCode == _installationSettings.RegionInfo.ThreeLetterISORegionName),
+        });
+
+        await SaveSettingAsync(dictionary, new PrivateMessageSettings
+        {
+            AllowPrivateMessages = false,
+            ShowAlertForPM = false,
+            PrivateMessagesPageSize = 10,
+            NotifyAboutPrivateMessages = false,
+            PMSubjectMaxLength = 450,
+            PMTextMaxLength = 4000
         });
 
         await SaveSettingAsync(dictionary, new MultiFactorAuthenticationSettings
@@ -1591,7 +1656,7 @@ public partial class InstallationService
             ImageSquarePictureSize = 32,
             MaximumImageSize = 1980,
             DefaultPictureZoomEnabled = false,
-            AllowSVGUploads = false,
+            AllowSvgUploads = false,
             DefaultImageQuality = 80,
             MultipleThumbDirectories = false,
             ImportProductImagesUsingHash = true,
@@ -1599,7 +1664,8 @@ public partial class InstallationService
             AutoOrientImage = false,
             VideoIframeAllow = "fullscreen",
             VideoIframeWidth = 300,
-            VideoIframeHeight = 150
+            VideoIframeHeight = 150,
+            PicturePath = NopMediaDefaults.DefaultImagesPath
         });
 
         await SaveSettingAsync(dictionary, new StoreInformationSettings
@@ -1609,7 +1675,7 @@ public partial class InstallationService
             AllowCustomerToSelectTheme = false,
             DisplayEuCookieLawWarning = isEurope,
             FacebookLink = "https://www.facebook.com/nopCommerce",
-            TwitterLink = "https://twitter.com/nopCommerce",
+            XLink = "https://x.com/nopCommerce",
             YoutubeLink = "https://www.youtube.com/user/nopCommerce",
             InstagramLink = "https://www.instagram.com/nopcommerce_official",
             HidePoweredByNopCommerce = false
@@ -1675,6 +1741,8 @@ public partial class InstallationService
             DisplayWishlistAfterAddingProduct = false,
             MaximumShoppingCartItems = 1000,
             MaximumWishlistItems = 1000,
+            AllowMultipleWishlist = true,
+            MaximumNumberOfCustomWishlist = 10,
             AllowOutOfStockItemsToBeAddedToWishlist = false,
             MoveItemsFromWishlistToCart = true,
             CartsSharedBetweenStores = false,
@@ -1727,6 +1795,7 @@ public partial class InstallationService
             CustomOrderNumberMask = "{ID}",
             ExportWithProducts = true,
             AllowAdminsToBuyCallForPriceProducts = true,
+            AllowCustomersCancelOrders = true,
             ShowProductThumbnailInOrderDetailsPage = true,
             DisplayCustomerCurrencyOnOrders = false,
             DisplayOrderSummary = true,
@@ -1766,6 +1835,8 @@ public partial class InstallationService
             HideShippingTotal = false,
             ReturnValidOptionsIfThereAreAny = true,
             BypassShippingMethodSelectionIfOnlyOne = false,
+            AllowCustomerToChooseDeliveryDate = true,
+            DeliveryDateRangeDays = 7,
             UseCubeRootMethod = true,
             ConsiderAssociatedProductsDimensions = true,
             ShipSeparatelyOneItemEach = false,
@@ -1837,55 +1908,6 @@ public partial class InstallationService
             BlogCommentsMustBeApproved = false,
             ShowBlogCommentsPerStore = false
         });
-        await SaveSettingAsync(dictionary, new NewsSettings
-        {
-            Enabled = true,
-            AllowNotRegisteredUsersToLeaveComments = true,
-            NotifyAboutNewNewsComments = false,
-            ShowNewsOnMainPage = true,
-            MainPageNewsCount = 3,
-            NewsArchivePageSize = 10,
-            ShowHeaderRssUrl = false,
-            NewsCommentsMustBeApproved = false,
-            ShowNewsCommentsPerStore = false
-        });
-
-        await SaveSettingAsync(dictionary, new ForumSettings
-        {
-            ForumsEnabled = false,
-            RelativeDateTimeFormattingEnabled = true,
-            AllowCustomersToDeletePosts = false,
-            AllowCustomersToEditPosts = false,
-            AllowCustomersToManageSubscriptions = false,
-            AllowGuestsToCreatePosts = false,
-            AllowGuestsToCreateTopics = false,
-            AllowPostVoting = true,
-            MaxVotesPerDay = 30,
-            TopicSubjectMaxLength = 450,
-            PostMaxLength = 4000,
-            StrippedTopicMaxLength = 45,
-            TopicsPageSize = 10,
-            PostsPageSize = 10,
-            SearchResultsPageSize = 10,
-            ActiveDiscussionsPageSize = 50,
-            LatestCustomerPostsPageSize = 10,
-            ShowCustomersPostCount = true,
-            ForumEditor = EditorType.BBCodeEditor,
-            SignaturesEnabled = true,
-            AllowPrivateMessages = false,
-            ShowAlertForPM = false,
-            PrivateMessagesPageSize = 10,
-            ForumSubscriptionsPageSize = 10,
-            NotifyAboutPrivateMessages = false,
-            PMSubjectMaxLength = 450,
-            PMTextMaxLength = 4000,
-            HomepageActiveDiscussionsTopicCount = 5,
-            ActiveDiscussionsFeedEnabled = false,
-            ActiveDiscussionsFeedCount = 25,
-            ForumFeedsEnabled = false,
-            ForumFeedCount = 10,
-            ForumSearchTermMinimumLength = 3
-        });
 
         await SaveSettingAsync(dictionary, new VendorSettings
         {
@@ -1905,38 +1927,6 @@ public partial class InstallationService
         var eaGeneral = await Table<EmailAccount>().FirstOrDefaultAsync() ?? throw new Exception("Default email account cannot be loaded");
         await SaveSettingAsync(dictionary, new EmailAccountSettings { DefaultEmailAccountId = eaGeneral.Id });
 
-        var displayMenuItems = !_installationSettings.InstallSampleData;
-
-        await SaveSettingAsync(dictionary, new DisplayDefaultMenuItemSettings
-        {
-            DisplayHomepageMenuItem = displayMenuItems,
-            DisplayNewProductsMenuItem = displayMenuItems,
-            DisplayProductSearchMenuItem = displayMenuItems,
-            DisplayCustomerInfoMenuItem = displayMenuItems,
-            DisplayBlogMenuItem = displayMenuItems,
-            DisplayForumsMenuItem = displayMenuItems,
-            DisplayContactUsMenuItem = displayMenuItems
-        });
-
-        await SaveSettingAsync(dictionary, new DisplayDefaultFooterItemSettings
-        {
-            DisplaySitemapFooterItem = true,
-            DisplayContactUsFooterItem = true,
-            DisplayProductSearchFooterItem = true,
-            DisplayNewsFooterItem = true,
-            DisplayBlogFooterItem = true,
-            DisplayForumsFooterItem = true,
-            DisplayRecentlyViewedProductsFooterItem = true,
-            DisplayCompareProductsFooterItem = true,
-            DisplayNewProductsFooterItem = true,
-            DisplayCustomerInfoFooterItem = true,
-            DisplayCustomerOrdersFooterItem = true,
-            DisplayCustomerAddressesFooterItem = true,
-            DisplayShoppingCartFooterItem = true,
-            DisplayWishlistFooterItem = true,
-            DisplayApplyVendorAccountFooterItem = true
-        });
-
         await SaveSettingAsync(dictionary, new CaptchaSettings
         {
             ReCaptchaApiUrl = "https://www.google.com/recaptcha/",
@@ -1955,9 +1945,7 @@ public partial class InstallationService
             ShowOnEmailProductToFriendPage = false,
             ShowOnEmailWishlistToFriendPage = false,
             ShowOnForgotPasswordPage = false,
-            ShowOnForum = false,
             ShowOnLoginPage = false,
-            ShowOnNewsCommentPage = false,
             ShowOnNewsletterPage = false,
             ShowOnProductReviewPage = false,
             ShowOnRegistrationPage = false,
@@ -1995,6 +1983,8 @@ public partial class InstallationService
                 "/files/exportimport/",
                 "/install",
                 "/*?*returnUrl=",
+                "/*?*returnurl=",
+                "/*?*ReturnUrl=",
                 //AJAX urls
                 "/cart/estimateshipping",
                 "/cart/selectshippingoption",
@@ -2002,7 +1992,6 @@ public partial class InstallationService
                 "/customer/removeexternalassociation",
                 "/customer/checkusernameavailability",
                 "/catalog/searchtermautocomplete",
-                "/catalog/getcatalogroot",
                 "/addproducttocart/catalog/*",
                 "/addproducttocart/details/*",
                 "/compareproducts/add/*",
@@ -2010,7 +1999,6 @@ public partial class InstallationService
                 "/subscribenewsletter",
                 "/t-popup/*",
                 "/setproductreviewhelpfulness",
-                "/poll/vote",
                 "/country/getstatesbycountryid/",
                 "/eucookielawaccept",
                 "/topic/authenticate",
@@ -2019,10 +2007,7 @@ public partial class InstallationService
                 "/uploadfileproductattribute/*",
                 "/shoppingcart/productdetails_attributechange/*",
                 "/uploadfilereturnrequest",
-                "/boards/topicwatch/*",
-                "/boards/forumwatch/*",
                 "/install/restartapplication",
-                "/boards/postvote",
                 "/product/estimateshipping/*",
                 "/shoppingcart/checkoutattributechange/*"
             ],
@@ -2031,16 +2016,6 @@ public partial class InstallationService
                 "/addproducttocart/catalog/",
                 "/addproducttocart/details/",
                 "/backinstocksubscriptions/manage",
-                "/boards/forumsubscriptions",
-                "/boards/forumwatch",
-                "/boards/postedit",
-                "/boards/postdelete",
-                "/boards/postcreate",
-                "/boards/topicedit",
-                "/boards/topicdelete",
-                "/boards/topiccreate",
-                "/boards/topicmove",
-                "/boards/topicwatch",
                 "/cart$",
                 "/changecurrency",
                 "/changelanguage",
@@ -2073,7 +2048,6 @@ public partial class InstallationService
                 "/order/history",
                 "/orderdetails",
                 "/passwordrecovery/confirm",
-                "/poll/vote",
                 "/privatemessages",
                 "/recentlyviewedproducts",
                 "/returnrequest",
@@ -2093,6 +2067,21 @@ public partial class InstallationService
                 "/wishlist"
             ]
         });
+
+        await SaveSettingAsync(dictionary, new FilterLevelSettings
+        {
+            DisplayOnHomePage = true,
+            DisplayOnProductDetailsPage = true
+        });
+
+        await SaveSettingAsync(dictionary, new MenuSettings
+        {
+            NumberOfSubItemsPerGridElement = 3,
+            NumberOfItemsPerGridRow = 4,
+            MaximumNumberEntities = 8,
+            GridThumbPictureSize = 220,
+            MaximumMainMenuLevels = 2
+        });
     }
 
     /// <summary>
@@ -2107,13 +2096,6 @@ public partial class InstallationService
             Active = true,
             IsSystemRole = true,
             SystemName = NopCustomerDefaults.AdministratorsRoleName
-        };
-        var crForumModerators = new CustomerRole
-        {
-            Name = "Forum Moderators",
-            Active = true,
-            IsSystemRole = true,
-            SystemName = NopCustomerDefaults.ForumModeratorsRoleName
         };
         var crRegistered = new CustomerRole
         {
@@ -2139,7 +2121,6 @@ public partial class InstallationService
         var customerRoles = new List<CustomerRole>
             {
                 crAdministrators,
-                crForumModerators,
                 crRegistered,
                 crGuests,
                 crVendors
@@ -2193,7 +2174,6 @@ public partial class InstallationService
 
         await _dataProvider.BulkInsertEntitiesAsync(new[]{
             new CustomerCustomerRoleMapping { CustomerId = adminUser.Id, CustomerRoleId = crAdministrators.Id },
-            new CustomerCustomerRoleMapping { CustomerId = adminUser.Id, CustomerRoleId = crForumModerators.Id },
             new CustomerCustomerRoleMapping { CustomerId = adminUser.Id, CustomerRoleId = crRegistered.Id }});
 
         //set hashed admin password
@@ -2266,7 +2246,6 @@ public partial class InstallationService
                     SystemName = "AboutUs",
                     IncludeInSitemap = false,
                     IsPasswordProtected = false,
-                    IncludeInFooterColumn1 = true,
                     DisplayOrder = 20,
                     Published = true,
                     Title = "About us",
@@ -2289,7 +2268,6 @@ public partial class InstallationService
                     SystemName = "ConditionsOfUse",
                     IncludeInSitemap = false,
                     IsPasswordProtected = false,
-                    IncludeInFooterColumn1 = true,
                     DisplayOrder = 15,
                     Published = true,
                     Title = "Conditions of Use",
@@ -2304,16 +2282,6 @@ public partial class InstallationService
                     Published = true,
                     Title = string.Empty,
                     Body = "<p>Put your contact information here. You can edit this in the admin site.</p>",
-                    TopicTemplateId = defaultTopicTemplate.Id
-                },
-                new() {
-                    SystemName = "ForumWelcomeMessage",
-                    IncludeInSitemap = false,
-                    IsPasswordProtected = false,
-                    DisplayOrder = 1,
-                    Published = true,
-                    Title = "Forums",
-                    Body = "<p>Put your welcome message here. You can edit this in the admin site.</p>",
                     TopicTemplateId = defaultTopicTemplate.Id
                 },
                 new() {
@@ -2342,7 +2310,6 @@ public partial class InstallationService
                     SystemName = "PrivacyInfo",
                     IncludeInSitemap = false,
                     IsPasswordProtected = false,
-                    IncludeInFooterColumn1 = true,
                     DisplayOrder = 10,
                     Published = true,
                     Title = "Privacy notice",
@@ -2364,7 +2331,6 @@ public partial class InstallationService
                     SystemName = "ShippingInfo",
                     IncludeInSitemap = false,
                     IsPasswordProtected = false,
-                    IncludeInFooterColumn1 = true,
                     DisplayOrder = 5,
                     Published = true,
                     Title = "Shipping & returns",
@@ -2386,7 +2352,6 @@ public partial class InstallationService
                     SystemName = "VendorTermsOfService",
                     IncludeInSitemap = false,
                     IsPasswordProtected = false,
-                    IncludeInFooterColumn1 = false,
                     DisplayOrder = 1,
                     Published = true,
                     Title = "Terms of services for vendors",
@@ -2501,6 +2466,11 @@ public partial class InstallationService
                     Name = "Add a new gift card"
                 },
                 new() {
+                    SystemKeyword = "AddNewFilterLevelValue",
+                    Enabled = true,
+                    Name = "Add a new filter level value"
+                },
+                new() {
                     SystemKeyword = "AddNewLanguage",
                     Enabled = true,
                     Name = "Add a new language"
@@ -2519,11 +2489,6 @@ public partial class InstallationService
                     SystemKeyword = "AddNewMeasureWeight",
                     Enabled = true,
                     Name = "Add a new measure weight"
-                },
-                new() {
-                    SystemKeyword = "AddNewNews",
-                    Enabled = true,
-                    Name = "Add a new news"
                 },
                 new() {
                     SystemKeyword = "AddNewProduct",
@@ -2559,6 +2524,16 @@ public partial class InstallationService
                     SystemKeyword = "AddNewStore",
                     Enabled = true,
                     Name = "Add a new store"
+                },
+                new() {
+                    SystemKeyword = "AddNewMenu",
+                    Enabled = true,
+                    Name = "Add a new menu"
+                },
+                new() {
+                    SystemKeyword = "AddNewMenuItem",
+                    Enabled = true,
+                    Name = "Add a new menu item"
                 },
                 new() {
                     SystemKeyword = "AddNewTopic",
@@ -2685,6 +2660,11 @@ public partial class InstallationService
                     Enabled = true,
                     Name = "Delete an email account"
                 },
+                new () {
+                    SystemKeyword = "DeleteFilterLevelValue",
+                    Enabled = true,
+                    Name = "Delete a filter level value"
+                },
                 new() {
                     SystemKeyword = "DeleteGiftCard",
                     Enabled = true,
@@ -2714,16 +2694,6 @@ public partial class InstallationService
                     SystemKeyword = "DeleteMessageTemplate",
                     Enabled = true,
                     Name = "Delete a message template"
-                },
-                new() {
-                    SystemKeyword = "DeleteNews",
-                    Enabled = true,
-                    Name = "Delete a news"
-                },
-                 new() {
-                    SystemKeyword = "DeleteNewsComment",
-                    Enabled = true,
-                    Name = "Delete a news comment"
                 },
                 new() {
                     SystemKeyword = "DeleteOrder",
@@ -2799,6 +2769,16 @@ public partial class InstallationService
                     SystemKeyword = "DeleteTopic",
                     Enabled = true,
                     Name = "Delete a topic"
+                },
+                new() {
+                    SystemKeyword = "DeleteMenu",
+                    Enabled = true,
+                    Name = "Delete a menu"
+                },
+                new() {
+                    SystemKeyword = "DeleteMenuItem",
+                    Enabled = true,
+                    Name = "Delete a menu item"
                 },
                 new() {
                     SystemKeyword = "DeleteVendor",
@@ -2906,6 +2886,11 @@ public partial class InstallationService
                     Name = "Edit an email account"
                 },
                 new() {
+                    SystemKeyword = "EditFilterLevelValue",
+                    Enabled = true,
+                    Name = "Edit a filter level value"
+                },
+                new() {
                     SystemKeyword = "EditGiftCard",
                     Enabled = true,
                     Name = "Edit a gift card"
@@ -2934,11 +2919,6 @@ public partial class InstallationService
                     SystemKeyword = "EditMessageTemplate",
                     Enabled = true,
                     Name = "Edit a message template"
-                },
-                new() {
-                    SystemKeyword = "EditNews",
-                    Enabled = true,
-                    Name = "Edit a news"
                 },
                 new() {
                     SystemKeyword = "EditOrder",
@@ -3036,6 +3016,16 @@ public partial class InstallationService
                     Name = "Edit a warehouse"
                 },
                 new() {
+                    SystemKeyword = "EditMenu",
+                    Enabled = true,
+                    Name = "Edit a menu"
+                },
+                new() {
+                    SystemKeyword = "EditMenuItem",
+                    Enabled = true,
+                    Name = "Edit a menu item"
+                },
+                new() {
                     SystemKeyword = "EditTopic",
                     Enabled = true,
                     Name = "Edit a topic"
@@ -3059,6 +3049,11 @@ public partial class InstallationService
                     SystemKeyword = "ImportCategories",
                     Enabled = true,
                     Name = "Categories were imported"
+                },
+                new() {
+                    SystemKeyword = "ImportFilterLevelValues",
+                    Enabled = true,
+                    Name = "Import filter level values"
                 },
                 new() {
                     SystemKeyword = "ImportManufacturers",
@@ -3094,6 +3089,11 @@ public partial class InstallationService
                     SystemKeyword = "ExportCategories",
                     Enabled = true,
                     Name = "Categories were exported"
+                },
+                new () {
+                    SystemKeyword = "ExportFilterLevelValues",
+                    Enabled = true,
+                    Name = "Export filter level values"
                 },
                 new() {
                     SystemKeyword = "ExportManufacturers",
@@ -3202,44 +3202,9 @@ public partial class InstallationService
                     Name = "Public store. Add product review"
                 },
                 new() {
-                    SystemKeyword = "PublicStore.AddNewsComment",
-                    Enabled = false,
-                    Name = "Public store. Add news comment"
-                },
-                new() {
                     SystemKeyword = "PublicStore.AddBlogComment",
                     Enabled = false,
                     Name = "Public store. Add blog comment"
-                },
-                new() {
-                    SystemKeyword = "PublicStore.AddForumTopic",
-                    Enabled = false,
-                    Name = "Public store. Add forum topic"
-                },
-                new() {
-                    SystemKeyword = "PublicStore.EditForumTopic",
-                    Enabled = false,
-                    Name = "Public store. Edit forum topic"
-                },
-                new() {
-                    SystemKeyword = "PublicStore.DeleteForumTopic",
-                    Enabled = false,
-                    Name = "Public store. Delete forum topic"
-                },
-                new() {
-                    SystemKeyword = "PublicStore.AddForumPost",
-                    Enabled = false,
-                    Name = "Public store. Add forum post"
-                },
-                new() {
-                    SystemKeyword = "PublicStore.EditForumPost",
-                    Enabled = false,
-                    Name = "Public store. Edit forum post"
-                },
-                new() {
-                    SystemKeyword = "PublicStore.DeleteForumPost",
-                    Enabled = false,
-                    Name = "Public store. Delete forum post"
                 },
                 new() {
                     SystemKeyword = "UploadNewPlugin",
@@ -3448,6 +3413,250 @@ public partial class InstallationService
         };
 
         await _dataProvider.BulkInsertEntitiesAsync(returnRequestActions);
+    }
+
+    /// <summary>
+    /// Installs menus
+    /// </summary>
+    /// <returns>A task that represents the asynchronous operation</returns>
+    protected virtual async Task InstallMenusAsync()
+    {
+        await _dataProvider.InsertEntityAsync(new Menu
+        {
+            Name = "Categories",
+            MenuType = MenuType.Main,
+            DisplayAllCategories = true,
+            Published = _installationSettings.InstallSampleData
+        });
+
+        var standardMainMenu = await _dataProvider.InsertEntityAsync(new Menu
+        {
+            Name = "Menu",
+            MenuType = MenuType.Main,
+            DisplayOrder = 0,
+            DisplayAllCategories = false,
+            Published = !_installationSettings.InstallSampleData
+        });
+
+        await _dataProvider.BulkInsertEntitiesAsync(
+        [
+            new MenuItem
+            {
+                MenuId = standardMainMenu.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.HOMEPAGE,
+                Title = "Home page",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = standardMainMenu.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.NEW_PRODUCTS,
+                Title = "New products",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = standardMainMenu.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.SEARCH,
+                Title = "Search",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = standardMainMenu.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.CUSTOMER_INFO,
+                Title = "My account",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = standardMainMenu.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.BLOG,
+                Title = "Blog",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = standardMainMenu.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.CONTACT_US,
+                Title = "Contact us",
+                Published = true
+            }
+        ]);
+
+        var footerInformation = await _dataProvider.InsertEntityAsync(new Menu
+        {
+            Name = "Information",
+            MenuType = MenuType.Footer,
+            DisplayOrder = 0,
+            Published = true
+        });
+
+        await _dataProvider.BulkInsertEntitiesAsync(
+        [
+            new MenuItem
+            {
+                MenuId = footerInformation.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.SITEMAP,
+                Title = "Sitemap",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerInformation.Id,
+                MenuItemType = MenuItemType.TopicPage,
+                EntityId = Table<Topic>().FirstOrDefault(t => t.SystemName == "ShippingInfo")?.Id,
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerInformation.Id,
+                MenuItemType = MenuItemType.TopicPage,
+                EntityId = Table<Topic>().FirstOrDefault(t => t.SystemName == "PrivacyInfo")?.Id,
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerInformation.Id,
+                MenuItemType = MenuItemType.TopicPage,
+                EntityId = Table<Topic>().FirstOrDefault(t => t.SystemName == "ConditionsOfUse")?.Id,
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerInformation.Id,
+                MenuItemType = MenuItemType.TopicPage,
+                EntityId = Table<Topic>().FirstOrDefault(t => t.SystemName == "AboutUs")?.Id,
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerInformation.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.CONTACT_US,
+                Title = "Contact us",
+                Published = true
+            },
+        ]);
+
+        var footerCustomerService = await _dataProvider.InsertEntityAsync(new Menu
+        {
+            Name = "Customer service",
+            MenuType = MenuType.Footer,
+            DisplayOrder = 1,
+            Published = true
+        });
+
+        await _dataProvider.BulkInsertEntitiesAsync(
+        [
+            new MenuItem
+            {
+                MenuId = footerCustomerService.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.SEARCH,
+                Title = "Search",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerCustomerService.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.BLOG,
+                Title = "Blog",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerCustomerService.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.RECENTLY_VIEWED_PRODUCTS,
+                Title = "Recently viewed products",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerCustomerService.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.COMPARE_PRODUCTS,
+                Title = "Compare products list",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerCustomerService.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.NEW_PRODUCTS,
+                Title = "New products",
+                Published = true
+            },
+        ]);
+
+        var footerMyAccount = await _dataProvider.InsertEntityAsync(new Menu
+        {
+            Name = "My account",
+            MenuType = MenuType.Footer,
+            DisplayOrder = 2,
+            Published = true
+        });
+
+        await _dataProvider.BulkInsertEntitiesAsync(
+        [
+           new MenuItem
+            {
+                MenuId = footerMyAccount.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.CUSTOMER_INFO,
+                Title = "My account",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerMyAccount.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.CUSTOMER_ORDERS,
+                Title = "Orders",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerMyAccount.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.CUSTOMER_ADDRESSES,
+                Title = "Addresses",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerMyAccount.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.CART,
+                Title = "Shopping cart",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerMyAccount.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.WISHLIST,
+                Title = "Wishlist",
+                Published = true
+            },
+            new MenuItem
+            {
+                MenuId = footerMyAccount.Id,
+                MenuItemType = MenuItemType.StandardPage,
+                RouteName = NopRouteNames.General.APPLY_VENDOR_ACCOUNT,
+                Title = "Apply for vendor account",
+                Published = true
+            },
+        ]);
     }
 
     #endregion

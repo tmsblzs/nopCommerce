@@ -46,7 +46,7 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IDiscountModelFactory, DiscountModelFactory>();
         services.AddScoped<IEmailAccountModelFactory, EmailAccountModelFactory>();
         services.AddScoped<IExternalAuthenticationMethodModelFactory, ExternalAuthenticationMethodModelFactory>();
-        services.AddScoped<IForumModelFactory, ForumModelFactory>();
+        services.AddScoped<IFilterLevelValueModelFactory, FilterLevelValueModelFactory>();
         services.AddScoped<IGiftCardModelFactory, GiftCardModelFactory>();
         services.AddScoped<IHomeModelFactory, HomeModelFactory>();
         services.AddScoped<ILanguageModelFactory, LanguageModelFactory>();
@@ -57,11 +57,9 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IMultiFactorAuthenticationMethodModelFactory, MultiFactorAuthenticationMethodModelFactory>();
         services.AddScoped<INewsLetterSubscriptionModelFactory, NewsLetterSubscriptionModelFactory>();
         services.AddScoped<INewsLetterSubscriptionTypeModelFactory, NewsLetterSubscriptionTypeModelFactory>();
-        services.AddScoped<INewsModelFactory, NewsModelFactory>();
         services.AddScoped<IOrderModelFactory, OrderModelFactory>();
         services.AddScoped<IPaymentModelFactory, PaymentModelFactory>();
         services.AddScoped<IPluginModelFactory, PluginModelFactory>();
-        services.AddScoped<IPollModelFactory, PollModelFactory>();
         services.AddScoped<IProductModelFactory, ProductModelFactory>();
         services.AddScoped<IProductAttributeModelFactory, ProductAttributeModelFactory>();
         services.AddScoped<IProductReviewModelFactory, ProductReviewModelFactory>();
@@ -83,6 +81,8 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IVendorAttributeModelFactory, VendorAttributeModelFactory>();
         services.AddScoped<IVendorModelFactory, VendorModelFactory>();
         services.AddScoped<Areas.Admin.Factories.IWidgetModelFactory, Areas.Admin.Factories.WidgetModelFactory>();
+        services.AddScoped<ITranslationModelFactory, TranslationModelFactory>();
+        services.AddScoped<IMenuModelFactory, MenuModelFactory>();
 
         //factories
         services.AddScoped<Factories.IAddressModelFactory, Factories.AddressModelFactory>();
@@ -92,13 +92,11 @@ public partial class NopStartup : INopStartup
         services.AddScoped<Factories.ICommonModelFactory, Factories.CommonModelFactory>();
         services.AddScoped<Factories.ICountryModelFactory, Factories.CountryModelFactory>();
         services.AddScoped<Factories.ICustomerModelFactory, Factories.CustomerModelFactory>();
-        services.AddScoped<Factories.IForumModelFactory, Factories.ForumModelFactory>();
+        services.AddScoped<Factories.IFilterLevelValueModelFactory, Factories.FilterLevelValueModelFactory>();
         services.AddScoped<Factories.IExternalAuthenticationModelFactory, Factories.ExternalAuthenticationModelFactory>();
         services.AddScoped<Factories.IJsonLdModelFactory, Factories.JsonLdModelFactory>();
-        services.AddScoped<Factories.INewsModelFactory, Factories.NewsModelFactory>();
         services.AddScoped<Factories.INewsLetterModelFactory, Factories.NewsLetterModelFactory>();
         services.AddScoped<Factories.IOrderModelFactory, Factories.OrderModelFactory>();
-        services.AddScoped<Factories.IPollModelFactory, Factories.PollModelFactory>();
         services.AddScoped<Factories.IPrivateMessagesModelFactory, Factories.PrivateMessagesModelFactory>();
         services.AddScoped<Factories.IProductModelFactory, Factories.ProductModelFactory>();
         services.AddScoped<Factories.IProfileModelFactory, Factories.ProfileModelFactory>();
@@ -107,6 +105,7 @@ public partial class NopStartup : INopStartup
         services.AddScoped<Factories.ISitemapModelFactory, Factories.SitemapModelFactory>();
         services.AddScoped<Factories.ITopicModelFactory, Factories.TopicModelFactory>();
         services.AddScoped<Factories.IVendorModelFactory, Factories.VendorModelFactory>();
+        services.AddScoped<Factories.IMenuModelFactory, Factories.MenuModelFactory>();
 
         //helpers classes
         services.AddScoped<ISummernoteHelper, SummernoteHelper>();
@@ -116,7 +115,7 @@ public partial class NopStartup : INopStartup
     /// Configure the using of added middleware
     /// </summary>
     /// <param name="application">Builder for configuring an application's request pipeline</param>
-    public void Configure(IApplicationBuilder application)
+    public virtual void Configure(IApplicationBuilder application)
     {
     }
 

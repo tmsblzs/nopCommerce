@@ -1,5 +1,4 @@
 ﻿using Microsoft.AspNetCore.Mvc.Rendering;
-using Nop.Core;
 using Nop.Core.Caching;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Discounts;
@@ -8,6 +7,7 @@ using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Core.Domain.Shipping;
 using Nop.Core.Domain.Tax;
+using Nop.Core.Domain.Translation;
 using Nop.Services;
 using Nop.Services.Catalog;
 using Nop.Services.Customers;
@@ -24,6 +24,7 @@ using Nop.Services.Tax;
 using Nop.Services.Topics;
 using Nop.Services.Vendors;
 using Nop.Web.Areas.Admin.Infrastructure.Cache;
+using Nop.Web.Framework.Models.Translation;
 using LogLevel = Nop.Core.Domain.Logging.LogLevel;
 
 namespace Nop.Web.Areas.Admin.Factories;
@@ -52,14 +53,14 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
     protected readonly IPluginService _pluginService;
     protected readonly IProductTemplateService _productTemplateService;
     protected readonly ISpecificationAttributeService _specificationAttributeService;
-    protected readonly IShippingService _shippingService;
     protected readonly IStateProvinceService _stateProvinceService;
     protected readonly IStaticCacheManager _staticCacheManager;
     protected readonly IStoreService _storeService;
     protected readonly ITaxCategoryService _taxCategoryService;
     protected readonly ITopicTemplateService _topicTemplateService;
     protected readonly IVendorService _vendorService;
-    protected readonly IWorkContext _workContext;
+    protected readonly IWarehouseService _warehouseService;
+    protected readonly TranslationSettings _translationSettings;
 
     #endregion
 
@@ -82,14 +83,14 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         IPluginService pluginService,
         IProductTemplateService productTemplateService,
         ISpecificationAttributeService specificationAttributeService,
-        IShippingService shippingService,
         IStateProvinceService stateProvinceService,
         IStaticCacheManager staticCacheManager,
         IStoreService storeService,
         ITaxCategoryService taxCategoryService,
         ITopicTemplateService topicTemplateService,
         IVendorService vendorService,
-        IWorkContext workContext)
+        IWarehouseService warehouseService,
+        TranslationSettings translationSettings)
     {
         _categoryService = categoryService;
         _categoryTemplateService = categoryTemplateService;
@@ -108,14 +109,14 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         _pluginService = pluginService;
         _productTemplateService = productTemplateService;
         _specificationAttributeService = specificationAttributeService;
-        _shippingService = shippingService;
         _stateProvinceService = stateProvinceService;
         _staticCacheManager = staticCacheManager;
         _storeService = storeService;
         _taxCategoryService = taxCategoryService;
         _topicTemplateService = topicTemplateService;
         _vendorService = vendorService;
-        _workContext = workContext;
+        _warehouseService = warehouseService;
+        _translationSettings = translationSettings;
     }
 
     #endregion
@@ -256,9 +257,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available activity log types
         var availableActivityTypes = await _customerActivityService.GetAllActivityTypesAsync();
         foreach (var activityType in availableActivityTypes)
-        {
             items.Add(new SelectListItem { Value = activityType.Id.ToString(), Text = activityType.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -278,9 +277,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available order statuses
         var availableStatusItems = await OrderStatus.Pending.ToSelectListAsync(false);
         foreach (var statusItem in availableStatusItems)
-        {
             items.Add(statusItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -300,9 +297,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available payment statuses
         var availableStatusItems = await PaymentStatus.Pending.ToSelectListAsync(false);
         foreach (var statusItem in availableStatusItems)
-        {
             items.Add(statusItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -322,9 +317,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available shipping statuses
         var availableStatusItems = await ShippingStatus.NotYetShipped.ToSelectListAsync(false);
         foreach (var statusItem in availableStatusItems)
-        {
             items.Add(statusItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -344,9 +337,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available countries
         var availableCountries = await _countryService.GetAllCountriesAsync(showHidden: true);
         foreach (var country in availableCountries)
-        {
             items.Add(new SelectListItem { Value = country.Id.ToString(), Text = country.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText ?? await _localizationService.GetResourceAsync("Admin.Address.SelectCountry"));
@@ -370,9 +361,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
             //prepare available states and provinces of the country
             var availableStates = await _stateProvinceService.GetStateProvincesByCountryIdAsync(countryId.Value, showHidden: true);
             foreach (var state in availableStates)
-            {
                 items.Add(new SelectListItem { Value = state.Id.ToString(), Text = state.Name });
-            }
 
             //insert special item for the default value
             if (items.Count > 1)
@@ -398,9 +387,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available languages
         var availableLanguages = await _languageService.GetAllLanguagesAsync(showHidden: true);
         foreach (var language in availableLanguages)
-        {
             items.Add(new SelectListItem { Value = language.Id.ToString(), Text = language.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -420,9 +407,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available stores
         var availableStores = await _storeService.GetAllStoresAsync();
         foreach (var store in availableStores)
-        {
             items.Add(new SelectListItem { Value = store.Id.ToString(), Text = store.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -442,9 +427,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available customer roles
         var availableCustomerRoles = await _customerService.GetAllCustomerRolesAsync();
         foreach (var customerRole in availableCustomerRoles)
-        {
             items.Add(new SelectListItem { Value = customerRole.Id.ToString(), Text = customerRole.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -464,9 +447,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available newsletter subscription types
         var availableSubscriptionTypes = await _newsLetterSubscriptionTypeService.GetAllNewsLetterSubscriptionTypesAsync();
         foreach (var subscriptionType in availableSubscriptionTypes)
-        {
             items.Add(new SelectListItem { Value = subscriptionType.Id.ToString(), Text = subscriptionType.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -486,9 +467,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available email accounts
         var availableEmailAccounts = await _emailAccountService.GetAllEmailAccountsAsync();
         foreach (var emailAccount in availableEmailAccounts)
-        {
             items.Add(new SelectListItem { Value = emailAccount.Id.ToString(), Text = $"{emailAccount.DisplayName} ({emailAccount.Email})" });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -508,9 +487,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available tax categories
         var availableTaxCategories = await _taxCategoryService.GetAllTaxCategoriesAsync();
         foreach (var taxCategory in availableTaxCategories)
-        {
             items.Add(new SelectListItem { Value = taxCategory.Id.ToString(), Text = taxCategory.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem,
@@ -531,9 +508,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available categories
         var availableCategoryItems = await GetCategoryListAsync();
         foreach (var categoryItem in availableCategoryItems)
-        {
             items.Add(categoryItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -553,9 +528,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available manufacturers
         var availableManufacturerItems = await GetManufacturerListAsync();
         foreach (var manufacturerItem in availableManufacturerItems)
-        {
             items.Add(manufacturerItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -575,9 +548,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available vendors
         var availableVendorItems = await GetVendorListAsync();
         foreach (var vendorItem in availableVendorItems)
-        {
             items.Add(vendorItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -597,9 +568,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available product types
         var availableProductTypeItems = await ProductType.SimpleProduct.ToSelectListAsync(false);
         foreach (var productTypeItem in availableProductTypeItems)
-        {
             items.Add(productTypeItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -619,9 +588,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available category templates
         var availableTemplates = await _categoryTemplateService.GetAllCategoryTemplatesAsync();
         foreach (var template in availableTemplates)
-        {
             items.Add(new SelectListItem { Value = template.Id.ToString(), Text = template.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -641,9 +608,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available time zones
         var availableTimeZones = _dateTimeHelper.GetSystemTimeZones();
         foreach (var timeZone in availableTimeZones)
-        {
             items.Add(new SelectListItem { Value = timeZone.Id, Text = timeZone.DisplayName });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -663,9 +628,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available shopping cart types
         var availableShoppingCartTypeItems = await ShoppingCartType.ShoppingCart.ToSelectListAsync(false);
         foreach (var shoppingCartTypeItem in availableShoppingCartTypeItems)
-        {
             items.Add(shoppingCartTypeItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -685,9 +648,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available tax display types
         var availableTaxDisplayTypeItems = await TaxDisplayType.ExcludingTax.ToSelectListAsync(false);
         foreach (var taxDisplayTypeItem in availableTaxDisplayTypeItems)
-        {
             items.Add(taxDisplayTypeItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -707,9 +668,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available currencies
         var availableCurrencies = await _currencyService.GetAllCurrenciesAsync(true);
         foreach (var currency in availableCurrencies)
-        {
             items.Add(new SelectListItem { Value = currency.Id.ToString(), Text = currency.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -729,9 +688,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available discount types
         var availableDiscountTypeItems = await DiscountType.AssignedToOrderTotal.ToSelectListAsync(false);
         foreach (var discountTypeItem in availableDiscountTypeItems)
-        {
             items.Add(discountTypeItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -751,9 +708,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available log levels
         var availableLogLevelItems = await LogLevel.Debug.ToSelectListAsync(false);
         foreach (var logLevelItem in availableLogLevelItems)
-        {
             items.Add(logLevelItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -774,9 +729,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available manufacturer templates
         var availableTemplates = await _manufacturerTemplateService.GetAllManufacturerTemplatesAsync();
         foreach (var template in availableTemplates)
-        {
             items.Add(new SelectListItem { Value = template.Id.ToString(), Text = template.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -796,9 +749,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available load plugin modes
         var availableLoadPluginModeItems = await LoadPluginsMode.All.ToSelectListAsync(false);
         foreach (var loadPluginModeItem in availableLoadPluginModeItems)
-        {
             items.Add(loadPluginModeItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -840,9 +791,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available return request statuses
         var availableStatusItems = await ReturnRequestStatus.Pending.ToSelectListAsync(false);
         foreach (var statusItem in availableStatusItems)
-        {
             items.Add(statusItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -862,9 +811,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available product templates
         var availableTemplates = await _productTemplateService.GetAllProductTemplatesAsync();
         foreach (var template in availableTemplates)
-        {
             items.Add(new SelectListItem { Value = template.Id.ToString(), Text = template.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -884,9 +831,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available topic templates
         var availableTemplates = await _topicTemplateService.GetAllTopicTemplatesAsync();
         foreach (var template in availableTemplates)
-        {
             items.Add(new SelectListItem { Value = template.Id.ToString(), Text = template.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -904,11 +849,9 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         ArgumentNullException.ThrowIfNull(items);
 
         //prepare available warehouses
-        var availableWarehouses = await _shippingService.GetAllWarehousesAsync();
+        var availableWarehouses = await _warehouseService.GetAllWarehousesAsync();
         foreach (var warehouse in availableWarehouses)
-        {
             items.Add(new SelectListItem { Value = warehouse.Id.ToString(), Text = warehouse.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -928,9 +871,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available delivery dates
         var availableDeliveryDates = await _dateRangeService.GetAllDeliveryDatesAsync();
         foreach (var date in availableDeliveryDates)
-        {
             items.Add(new SelectListItem { Value = date.Id.ToString(), Text = date.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -951,9 +892,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available product availability ranges
         var availableProductAvailabilityRanges = await _dateRangeService.GetAllProductAvailabilityRangesAsync();
         foreach (var range in availableProductAvailabilityRanges)
-        {
             items.Add(new SelectListItem { Value = range.Id.ToString(), Text = range.Name });
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -973,9 +912,7 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available request types
         var gdprRequestTypeItems = await GdprRequestType.ConsentAgree.ToSelectListAsync(false);
         foreach (var gdprRequestTypeItem in gdprRequestTypeItems)
-        {
             items.Add(gdprRequestTypeItem);
-        }
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText);
@@ -995,15 +932,29 @@ public partial class BaseAdminModelFactory : IBaseAdminModelFactory
         //prepare available specification attribute groups
         var availableSpecificationAttributeGroups = await _specificationAttributeService.GetSpecificationAttributeGroupsAsync();
         foreach (var group in availableSpecificationAttributeGroups)
-        {
             items.Add(new SelectListItem { Value = group.Id.ToString(), Text = group.Name });
-        }
 
         // use empty string for nullable field
         var defaultItemValue = string.Empty;
 
         //insert special item for the default value
         await PrepareDefaultItemAsync(items, withSpecialDefaultItem, defaultItemText, defaultItemValue);
+    }    
+
+    /// <summary>
+    /// Prepare translation supported model
+    /// </summary>
+    /// <param name="model">Translation supported model</param>
+    /// <returns>A task that represents the asynchronous operation</returns>
+    public virtual async Task PreparePreTranslationSupportModelAsync(ITranslationSupportedModel model)
+    {
+        if (!_translationSettings.AllowPreTranslate)
+            return;
+
+        var allLanguages = await _languageService.GetAllLanguagesAsync(showHidden: true);
+        model.PreTranslationAvailable = allLanguages.Any(l =>
+            !_translationSettings.NotTranslateLanguages.Contains(l.Id) &&
+            l.Id != _translationSettings.TranslateFromLanguageId);
     }
 
     #endregion

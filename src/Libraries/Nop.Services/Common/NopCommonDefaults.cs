@@ -101,6 +101,15 @@ public static partial class NopCommonDefaults
 
     #endregion
 
+    #region nopCommerce GitHub
+
+    /// <summary>
+    /// Gets the URL to get information about the latest nopCommerce release
+    /// </summary>
+    public static string LatestReleaseInfoUrl => "https://api.github.com/repos/nopSolutions/nopCommerce/releases/latest";
+
+    #endregion
+
     #region nopCommerce official site
 
     /// <summary>
@@ -113,6 +122,18 @@ public static partial class NopCommonDefaults
     /// {3} : language code
     /// </remarks>
     public static string NopWarningPath => "site-warnings?url={0}&version={1}&email={2}&language={3}";
+
+    /// <summary>
+    /// Gets a path to request the nopCommerce official site for license terms
+    /// </summary>
+    /// <remarks>
+    /// {0} : store URL
+    /// {1} : nopCommerce version
+    /// {2} : admin email
+    /// {3} : language code
+    /// {4} : whether the license terms accepted
+    /// </remarks>
+    public static string NopLicenseTermsPath => "license-terms?url={0}&version={1}&email={2}&language={3}&accepted={4}";
 
     /// <summary>
     /// Gets a path to request the nopCommerce official site for license compliance check
@@ -192,6 +213,28 @@ public static partial class NopCommonDefaults
 
     #region Caching defaults
 
+    #region nopCommerce GitHub
+
+    /// <summary>
+    /// Gets a key for caching
+    /// </summary>
+    public static CacheKey LatestReleaseInfoCacheKey => new("Nop.latestreleaseinfo")
+    {
+        CacheTime = LatestReleaseInfoCacheTime
+    };
+
+    /// <summary>
+    /// Gets a cache time in seconds for LatestReleaseInfo data
+    /// </summary>
+    public static int LatestReleaseInfoCacheTime => 43200; // 12 hours
+
+    /// <summary>
+    /// Gets a period (in seconds) before the request times out
+    /// </summary>
+    public static int GitHubRequestTimeout => 5;
+
+    #endregion
+
     #region Generic attributes
 
     /// <summary>
@@ -205,6 +248,15 @@ public static partial class NopCommonDefaults
 
     #endregion
 
+    /// <summary>
+    /// Gets a key for product search terms
+    /// </summary>
+    /// <remarks>
+    /// {0} : customer id
+    /// {1} : store id
+    /// </remarks>
+    public static CacheKey SearchTermsCacheKey => new("Nop.searchterms.{0}-{1}");
+
     #endregion
 
     /// <summary>
@@ -216,4 +268,9 @@ public static partial class NopCommonDefaults
     /// ~/App_Data/Pdf/Vazirmatn.ttf
     /// </summary>
     public static string PdfRtlFontName => "Vazirmatn";
+
+    /// <summary>
+    /// Gets a relative project path to the font directory
+    /// </summary>
+    public static string PdfFontDirectoryPath => "~/App_Data/Pdf/";
 }

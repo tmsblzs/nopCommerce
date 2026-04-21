@@ -240,6 +240,16 @@ public partial class CatalogSettings : ISettings
     public int ProductSearchTermMinimumLength { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether to display the search term history in the autocomplete list of the search box
+    /// </summary>
+    public bool ShowSearchTermHistory { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum number of search term history items to display
+    /// </summary>
+    public int NumberOfSearchTermHistoryItems { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether to show bestsellers on home page
     /// </summary>
     public bool ShowBestsellersOnHomepage { get; set; }
@@ -538,11 +548,6 @@ public partial class CatalogSettings : ISettings
     /// Get or set a value indicating whether it's necessary to show the date for pre-order availability in a public store
     /// </summary>
     public bool DisplayDatePreOrderAvailability { get; set; }
-
-    /// <summary>
-    /// Get or set a value indicating whether to use a standard menu in public store or use Ajax to load a menu
-    /// </summary>
-    public bool UseAjaxLoadMenu { get; set; }
 
     /// <summary>
     /// Get or set a value indicating whether to use standard or AJAX products loading (applicable to 'paging', 'filtering', 'view modes') in catalog

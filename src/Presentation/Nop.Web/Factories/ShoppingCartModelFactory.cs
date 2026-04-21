@@ -56,6 +56,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
     protected readonly ICountryService _countryService;
     protected readonly ICurrencyService _currencyService;
     protected readonly ICustomerService _customerService;
+    protected readonly ICustomWishlistService _customWishlistService;
     protected readonly IDateTimeHelper _dateTimeHelper;
     protected readonly IDiscountService _discountService;
     protected readonly IDownloadService _downloadService;
@@ -110,6 +111,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
         ICountryService countryService,
         ICurrencyService currencyService,
         ICustomerService customerService,
+        ICustomWishlistService customWishlistService,
         IDateTimeHelper dateTimeHelper,
         IDiscountService discountService,
         IDownloadService downloadService,
@@ -152,6 +154,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
         _catalogSettings = catalogSettings;
         _commonSettings = commonSettings;
         _customerSettings = customerSettings;
+        _customWishlistService = customWishlistService;
         _addressModelFactory = addressModelFactory;
         _checkoutAttributeParser = checkoutAttributeParser;
         _checkoutAttributeService = checkoutAttributeService;
@@ -259,11 +262,15 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
                             await _currencyService.ConvertFromPrimaryStoreCurrencyAsync(priceAdjustmentBase,
                                 await _workContext.GetWorkingCurrencyAsync());
                         if (priceAdjustmentBase > decimal.Zero)
+                        {
                             attributeValueModel.PriceAdjustment =
                                 "+" + await _priceFormatter.FormatPriceAsync(priceAdjustment);
+                        }
                         else if (priceAdjustmentBase < decimal.Zero)
+                        {
                             attributeValueModel.PriceAdjustment =
                                 "-" + await _priceFormatter.FormatPriceAsync(-priceAdjustment);
+                        }
                     }
                 }
             }
@@ -291,8 +298,10 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
                             _checkoutAttributeParser.ParseAttributeValues(selectedCheckoutAttributes);
                         foreach (var attributeValue in await selectedValues.SelectMany(x => x.values).ToListAsync())
                         foreach (var item in attributeModel.Values)
+                        {
                             if (attributeValue.Id == item.Id)
                                 item.IsPreSelected = true;
+                        }
                     }
                 }
 
@@ -418,8 +427,10 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
 
         //recurring info
         if (product.IsRecurring)
+        {
             cartItemModel.RecurringInfo = string.Format(await _localizationService.GetResourceAsync("ShoppingCart.RecurringPeriod"),
                 product.RecurringCycleLength, await _localizationService.GetLocalizedEnumAsync(product.RecurringCyclePeriod));
+        }
 
         //rental info
         if (product.IsRental)
@@ -558,8 +569,10 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
 
         //recurring info
         if (product.IsRecurring)
+        {
             cartItemModel.RecurringInfo = string.Format(await _localizationService.GetResourceAsync("ShoppingCart.RecurringPeriod"),
                 product.RecurringCycleLength, await _localizationService.GetLocalizedEnumAsync(product.RecurringCyclePeriod));
+        }
 
         //rental info
         if (product.IsRental)
@@ -733,6 +746,12 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
                 NopCustomerDefaults.SelectedShippingOptionAttribute, store.Id);
             if (shippingOption != null)
                 model.ShippingMethod = shippingOption.Name;
+
+            //selected delivery date
+            var desiredDeliveryDate = await _genericAttributeService.GetAttributeAsync<DateTime?>(customer,
+                NopCustomerDefaults.DesiredDeliveryDate, store.Id);
+            if (desiredDeliveryDate.HasValue)
+                model.DesiredDeliveryDate = (await _dateTimeHelper.ConvertToUserTimeAsync(desiredDeliveryDate.Value, DateTimeKind.Utc)).ToString("D");
         }
 
         //payment info
@@ -744,9 +763,8 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
             : string.Empty;
 
         //custom values
-        var processPaymentRequestTask = _orderProcessingService.GetProcessPaymentRequestAsync();
-        if (processPaymentRequestTask != null)
-            model.CustomValues = (await processPaymentRequestTask)?.CustomValues;
+        var processPaymentRequest = await _orderProcessingService.GetProcessPaymentRequestAsync();
+        model.CustomValues.AddRange(processPaymentRequest?.CustomValues?.Where(value => value.DisplayToCustomer).ToList() ?? new());
 
         return model;
     }
@@ -793,12 +811,14 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
 
             var currentLanguage = await _workContext.GetWorkingLanguageAsync();
             foreach (var c in await _countryService.GetAllCountriesForShippingAsync(currentLanguage.Id))
+            {
                 model.AvailableCountries.Add(new SelectListItem
                 {
                     Text = await _localizationService.GetLocalizedAsync(c, x => x.Name),
                     Value = c.Id.ToString(),
                     Selected = c.Id == defaultEstimateCountryId
                 });
+            }
 
             //states
             var defaultEstimateStateId = (setEstimateShippingDefaultAddress && shippingAddress != null)
@@ -949,9 +969,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
 
         //order review data
         if (prepareAndDisplayOrderReviewData)
-        {
             model.OrderReviewData = await PrepareOrderReviewDataModelAsync(cart);
-        }
 
         return model;
     }
@@ -962,20 +980,44 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
     /// <param name="model">Wishlist model</param>
     /// <param name="cart">List of the shopping cart item</param>
     /// <param name="isEditable">Whether model is editable</param>
+    /// <param name="list">Custom wishlist identifier</param>
     /// <returns>
     /// A task that represents the asynchronous operation
     /// The task result contains the wishlist model
     /// </returns>
-    public virtual async Task<WishlistModel> PrepareWishlistModelAsync(WishlistModel model, IList<ShoppingCartItem> cart, bool isEditable = true)
+    public virtual async Task<WishlistModel> PrepareWishlistModelAsync(WishlistModel model, IList<ShoppingCartItem> cart, bool isEditable = true, int? list = null)
     {
         ArgumentNullException.ThrowIfNull(cart);
-
         ArgumentNullException.ThrowIfNull(model);
 
+        var currentCustomer = await _workContext.GetCurrentCustomerAsync();
+        var isGuest = await _customerService.IsGuestAsync(currentCustomer);
+
         model.EmailWishlistEnabled = _shoppingCartSettings.EmailWishlistEnabled;
+        model.ListId = list;
+        model.AllowMultipleWishlist = _shoppingCartSettings.AllowMultipleWishlist && !isGuest;
         model.IsEditable = isEditable;
         model.DisplayAddToCart = await _permissionService.AuthorizeAsync(StandardPermission.PublicStore.ENABLE_SHOPPING_CART);
         model.DisplayTaxShippingInfo = _catalogSettings.DisplayTaxShippingInfoWishlist;
+
+        //custom wishlist items
+        var currentWishlists = await _customWishlistService.GetAllCustomWishlistsAsync(currentCustomer.Id);
+        foreach (var wishlist in currentWishlists)
+        {
+            var customWishlistModel = new CustomWishlistModel
+            {
+                Id = wishlist.Id,
+                Name = wishlist.Name
+            };
+            model.CustomWishlistItems.Add(customWishlistModel);
+        }
+
+        if (list != null)
+        {
+            var customWishlist = await _customWishlistService.GetCustomWishlistByIdAsync(list.Value);
+            if (customWishlist != null)
+                model.CustomWishlistName = customWishlist.Name;
+        }
 
         if (!cart.Any())
             return model;
@@ -1457,11 +1499,12 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
     /// </summary>
     /// <param name="model">Wishlist email a friend model</param>
     /// <param name="excludeProperties">Whether to exclude populating of model properties from the entity</param>
+    /// <param name="wishlistId">Custom wishlist identifier</param>
     /// <returns>
     /// A task that represents the asynchronous operation
     /// The task result contains the wishlist email a friend model
     /// </returns>
-    public virtual async Task<WishlistEmailAFriendModel> PrepareWishlistEmailAFriendModelAsync(WishlistEmailAFriendModel model, bool excludeProperties)
+    public virtual async Task<WishlistEmailAFriendModel> PrepareWishlistEmailAFriendModelAsync(WishlistEmailAFriendModel model, bool excludeProperties, int? wishlistId = null)
     {
         ArgumentNullException.ThrowIfNull(model);
 
@@ -1471,6 +1514,8 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
             var customer = await _workContext.GetCurrentCustomerAsync();
             model.YourEmailAddress = customer.Email;
         }
+
+        model.ListId = wishlistId;
 
         return model;
     }

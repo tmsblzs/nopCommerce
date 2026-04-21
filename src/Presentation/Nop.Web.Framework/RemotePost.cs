@@ -2,7 +2,7 @@
 using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.Http;
-using Nop.Core;
+using Nop.Services.Helpers;
 
 namespace Nop.Web.Framework;
 
@@ -65,7 +65,7 @@ public partial class RemotePost
     /// </summary>
     /// <param name="name">The key of the element to add</param>
     /// <param name="value">The value of the element to add.</param>
-    public void Add(string name, string value)
+    public virtual void Add(string name, string value)
     {
         Params.Add(name, value);
     }
@@ -73,7 +73,7 @@ public partial class RemotePost
     /// <summary>
     /// Post
     /// </summary>
-    public void Post()
+    public virtual void Post()
     {
         //text
         var sb = new StringBuilder();
@@ -108,8 +108,10 @@ public partial class RemotePost
         else
         {
             for (var i = 0; i < Params.Keys.Count; i++)
+            {
                 sb.Append(
                     $"<input name=\"{WebUtility.HtmlEncode(Params.Keys[i])}\" type=\"hidden\" value=\"{WebUtility.HtmlEncode(Params[Params.Keys[i]])}\">");
+            }
         }
         sb.Append("</form>");
         sb.Append("</body></html>");
@@ -125,9 +127,7 @@ public partial class RemotePost
         response.ContentType = "text/html; charset=utf-8";
         response.ContentLength = data.Length;
 
-        response.Body
-            .WriteAsync(data, 0, data.Length)
-            .Wait();
+        response.Body.Write(data, 0, data.Length);
 
         //store a value indicating whether POST has been done
         _webHelper.IsPostBeingDone = true;

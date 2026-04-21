@@ -1,9 +1,8 @@
 ﻿using System.Globalization;
 using System.Net;
 using System.Text;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Infrastructure;
-using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Nop.Core;
 using Nop.Core.Domain;
 using Nop.Core.Domain.Blogs;
@@ -11,10 +10,8 @@ using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Directory;
-using Nop.Core.Domain.Forums;
 using Nop.Core.Domain.Localization;
 using Nop.Core.Domain.Messages;
-using Nop.Core.Domain.News;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Core.Domain.Shipping;
@@ -22,6 +19,7 @@ using Nop.Core.Domain.Stores;
 using Nop.Core.Domain.Tax;
 using Nop.Core.Domain.Vendors;
 using Nop.Core.Events;
+using Nop.Core.Http;
 using Nop.Core.Infrastructure;
 using Nop.Services.Attributes;
 using Nop.Services.Blogs;
@@ -29,12 +27,10 @@ using Nop.Services.Catalog;
 using Nop.Services.Common;
 using Nop.Services.Customers;
 using Nop.Services.Directory;
-using Nop.Services.Forums;
 using Nop.Services.Helpers;
 using Nop.Services.Html;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
-using Nop.Services.News;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Seo;
@@ -53,7 +49,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
 
     protected readonly CatalogSettings _catalogSettings;
     protected readonly CurrencySettings _currencySettings;
-    protected readonly IActionContextAccessor _actionContextAccessor;
     protected readonly IAddressService _addressService;
     protected readonly IAttributeFormatter<AddressAttribute, AddressAttributeValue> _addressAttributeFormatter;
     protected readonly IAttributeFormatter<CustomerAttribute, CustomerAttributeValue> _customerAttributeFormatter;
@@ -67,10 +62,10 @@ public partial class MessageTokenProvider : IMessageTokenProvider
     protected readonly IGenericAttributeService _genericAttributeService;
     protected readonly IGiftCardService _giftCardService;
     protected readonly IHtmlFormatter _htmlFormatter;
+    protected readonly IHttpContextAccessor _httpContextAccessor;
     protected readonly ILanguageService _languageService;
     protected readonly ILocalizationService _localizationService;
     protected readonly ILogger _logger;
-    protected readonly INewsService _newsService;
     protected readonly IOrderService _orderService;
     protected readonly IPaymentPluginManager _paymentPluginManager;
     protected readonly IPaymentService _paymentService;
@@ -81,9 +76,9 @@ public partial class MessageTokenProvider : IMessageTokenProvider
     protected readonly IStateProvinceService _stateProvinceService;
     protected readonly IStoreContext _storeContext;
     protected readonly IStoreService _storeService;
-    protected readonly IUrlHelperFactory _urlHelperFactory;
     protected readonly IUrlRecordService _urlRecordService;
     protected readonly IWorkContext _workContext;
+    protected readonly LinkGenerator _linkGenerator;
     protected readonly MessageTemplatesSettings _templatesSettings;
     protected readonly PaymentSettings _paymentSettings;
     protected readonly StoreInformationSettings _storeInformationSettings;
@@ -97,7 +92,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
 
     public MessageTokenProvider(CatalogSettings catalogSettings,
         CurrencySettings currencySettings,
-        IActionContextAccessor actionContextAccessor,
         IAddressService addressService,
         IAttributeFormatter<AddressAttribute, AddressAttributeValue> addressAttributeFormatter,
         IAttributeFormatter<CustomerAttribute, CustomerAttributeValue> customerAttributeFormatter,
@@ -111,10 +105,10 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         IGenericAttributeService genericAttributeService,
         IGiftCardService giftCardService,
         IHtmlFormatter htmlFormatter,
+        IHttpContextAccessor httpContextAccessor,
         ILanguageService languageService,
         ILocalizationService localizationService,
         ILogger logger,
-        INewsService newsService,
         IOrderService orderService,
         IPaymentPluginManager paymentPluginManager,
         IPaymentService paymentService,
@@ -125,9 +119,9 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         IStateProvinceService stateProvinceService,
         IStoreContext storeContext,
         IStoreService storeService,
-        IUrlHelperFactory urlHelperFactory,
         IUrlRecordService urlRecordService,
         IWorkContext workContext,
+        LinkGenerator linkGenerator,
         MessageTemplatesSettings templatesSettings,
         PaymentSettings paymentSettings,
         StoreInformationSettings storeInformationSettings,
@@ -135,7 +129,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
     {
         _catalogSettings = catalogSettings;
         _currencySettings = currencySettings;
-        _actionContextAccessor = actionContextAccessor;
         _addressService = addressService;
         _addressAttributeFormatter = addressAttributeFormatter;
         _customerAttributeFormatter = customerAttributeFormatter;
@@ -149,10 +142,10 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         _genericAttributeService = genericAttributeService;
         _giftCardService = giftCardService;
         _htmlFormatter = htmlFormatter;
+        _httpContextAccessor = httpContextAccessor;
         _languageService = languageService;
         _localizationService = localizationService;
         _logger = logger;
-        _newsService = newsService;
         _orderService = orderService;
         _paymentPluginManager = paymentPluginManager;
         _paymentService = paymentService;
@@ -163,9 +156,9 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         _stateProvinceService = stateProvinceService;
         _storeContext = storeContext;
         _storeService = storeService;
-        _urlHelperFactory = urlHelperFactory;
         _urlRecordService = urlRecordService;
         _workContext = workContext;
+        _linkGenerator = linkGenerator;
         _templatesSettings = templatesSettings;
         _paymentSettings = paymentSettings;
         _storeInformationSettings = storeInformationSettings;
@@ -202,8 +195,13 @@ public partial class MessageTokenProvider : IMessageTokenProvider
                         "%Store.CompanyVat%",
                         "%Facebook.URL%",
                         "%Twitter.URL%",
+                        "%X.URL%",
                         "%YouTube.URL%",
-                        "%Instagram.URL%"
+                        "%Instagram.URL%",
+                        "%TikTok.URL%",
+                        "%Snapchat.URL%",
+                        "%Pinterest.URL%",
+                        "%Tumblr.URL%"
                     }
                 },
 
@@ -269,7 +267,10 @@ public partial class MessageTokenProvider : IMessageTokenProvider
                         "%Order.ShippingAddressLine%",
                         "%Order.PaymentMethod%",
                         "%Order.VatNumber%",
-                        "%Order.CustomValues%",
+                        $"%Order.CustomValues.{CustomValueDisplayLocation.BillingAddress.ToString()}%",
+                        $"%Order.CustomValues.{CustomValueDisplayLocation.ShippingAddress.ToString()}%",
+                        $"%Order.CustomValues.{CustomValueDisplayLocation.Payment.ToString()}%",
+                        $"%Order.CustomValues.{CustomValueDisplayLocation.Shipping.ToString()}%",
                         "%Order.Product(s)%",
                         "%Order.CreatedOn%",
                         "%Order.OrderURLForCustomer%",
@@ -366,36 +367,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
                     }
                 },
 
-                //forum tokens
-                {
-                    TokenGroupNames.ForumTokens,
-                    new[]
-                    {
-                        "%Forums.ForumURL%",
-                        "%Forums.ForumName%"
-                    }
-                },
-
-                //forum topic tokens
-                {
-                    TokenGroupNames.ForumTopicTokens,
-                    new[]
-                    {
-                        "%Forums.TopicURL%",
-                        "%Forums.TopicName%"
-                    }
-                },
-
-                //forum post tokens
-                {
-                    TokenGroupNames.ForumPostTokens,
-                    new[]
-                    {
-                        "%Forums.PostAuthor%",
-                        "%Forums.PostBody%"
-                    }
-                },
-
                 //private message tokens
                 {
                     TokenGroupNames.PrivateMessageTokens,
@@ -462,15 +433,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
                     new[]
                     {
                         "%BlogComment.BlogPostTitle%"
-                    }
-                },
-
-                //news comment tokens
-                {
-                    TokenGroupNames.NewsCommentTokens,
-                    new[]
-                    {
-                        "%NewsComment.NewsTitle%"
                     }
                 },
 
@@ -588,7 +550,7 @@ public partial class MessageTokenProvider : IMessageTokenProvider
             //add download link
             if (await _orderService.IsDownloadAllowedAsync(orderItem))
             {
-                var downloadUrl = await RouteUrlAsync(order.StoreId, "GetDownload", new { orderItemId = orderItem.OrderItemGuid });
+                var downloadUrl = await RouteUrlAsync(order.StoreId, NopRouteNames.Standard.GET_DOWNLOAD, new { orderItemId = orderItem.OrderItemGuid });
                 var downloadLink = $"<a class=\"link\" href=\"{downloadUrl}\">{await _localizationService.GetResourceAsync("Messages.Order.Product(s).Download", languageId)}</a>";
                 sb.AppendLine("<br />");
                 sb.AppendLine(downloadLink);
@@ -596,7 +558,7 @@ public partial class MessageTokenProvider : IMessageTokenProvider
             //add download link
             if (await _orderService.IsLicenseDownloadAllowedAsync(orderItem))
             {
-                var licenseUrl = await RouteUrlAsync(order.StoreId, "GetLicense", new { orderItemId = orderItem.OrderItemGuid });
+                var licenseUrl = await RouteUrlAsync(order.StoreId, NopRouteNames.Standard.GET_LICENSE, new { orderItemId = orderItem.OrderItemGuid });
                 var licenseLink = $"<a class=\"link\" href=\"{licenseUrl}\">{await _localizationService.GetResourceAsync("Messages.Order.Product(s).License", languageId)}</a>";
                 sb.AppendLine("<br />");
                 sb.AppendLine(licenseLink);
@@ -818,15 +780,11 @@ public partial class MessageTokenProvider : IMessageTokenProvider
 
         //discount (applied to order subtotal)
         if (displaySubTotalDiscount)
-        {
             sb.AppendLine($"<tr style=\"text-align:right;\"><td>&nbsp;</td><td colspan=\"2\" style=\"background-color: {_templatesSettings.Color3};padding:0.6em 0.4em;\"><strong>{await _localizationService.GetResourceAsync("Messages.Order.SubTotalDiscount", languageId)}</strong></td> <td style=\"background-color: {_templatesSettings.Color3};padding:0.6em 0.4em;\"><strong>{cusSubTotalDiscount}</strong></td></tr>");
-        }
 
         //shipping
         if (displayShipping)
-        {
             sb.AppendLine($"<tr style=\"text-align:right;\"><td>&nbsp;</td><td colspan=\"2\" style=\"background-color: {_templatesSettings.Color3};padding:0.6em 0.4em;\"><strong>{await _localizationService.GetResourceAsync("Messages.Order.Shipping", languageId)}</strong></td> <td style=\"background-color: {_templatesSettings.Color3};padding:0.6em 0.4em;\"><strong>{cusShipTotal}</strong></td></tr>");
-        }
 
         //payment method fee
         if (displayPaymentMethodFee)
@@ -837,9 +795,7 @@ public partial class MessageTokenProvider : IMessageTokenProvider
 
         //tax
         if (displayTax)
-        {
             sb.AppendLine($"<tr style=\"text-align:right;\"><td>&nbsp;</td><td colspan=\"2\" style=\"background-color: {_templatesSettings.Color3};padding:0.6em 0.4em;\"><strong>{await _localizationService.GetResourceAsync("Messages.Order.Tax", languageId)}</strong></td> <td style=\"background-color: {_templatesSettings.Color3};padding:0.6em 0.4em;\"><strong>{cusTaxTotal}</strong></td></tr>");
-        }
 
         if (displayTaxRates)
         {
@@ -854,9 +810,7 @@ public partial class MessageTokenProvider : IMessageTokenProvider
 
         //discount
         if (displayDiscount)
-        {
             sb.AppendLine($"<tr style=\"text-align:right;\"><td>&nbsp;</td><td colspan=\"2\" style=\"background-color: {_templatesSettings.Color3};padding:0.6em 0.4em;\"><strong>{await _localizationService.GetResourceAsync("Messages.Order.TotalDiscount", languageId)}</strong></td> <td style=\"background-color: {_templatesSettings.Color3};padding:0.6em 0.4em;\"><strong>{cusDiscount}</strong></td></tr>");
-        }
 
         //gift cards
         foreach (var gcuh in await _giftCardService.GetGiftCardUsageHistoryAsync(order))
@@ -987,11 +941,17 @@ public partial class MessageTokenProvider : IMessageTokenProvider
                 throw new Exception("Store URL cannot be empty");
 
             //generate the relative URL
-            var urlHelper = _urlHelperFactory.GetUrlHelper(_actionContextAccessor.ActionContext);
-            var url = urlHelper.RouteUrl(routeName, routeValues);
+            var path = _linkGenerator.GetPathByName(
+                httpContext: _httpContextAccessor.HttpContext,
+                endpointName: routeName,
+                values: routeValues
+            );
+
+            if (string.IsNullOrEmpty(path))
+                return store.Url;
 
             //compose the result
-            return new Uri(new Uri(store.Url), url).AbsoluteUri;
+            return new Uri(new Uri(store.Url), path).AbsoluteUri;
         }
         catch (Exception exception)
         {
@@ -1027,9 +987,14 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         tokens.Add(new Token("Store.CompanyVat", store.CompanyVat));
 
         tokens.Add(new Token("Facebook.URL", _storeInformationSettings.FacebookLink));
-        tokens.Add(new Token("Twitter.URL", _storeInformationSettings.TwitterLink));
+        tokens.Add(new Token("Twitter.URL", _storeInformationSettings.XLink));
+        tokens.Add(new Token("X.URL", _storeInformationSettings.XLink));
         tokens.Add(new Token("YouTube.URL", _storeInformationSettings.YoutubeLink));
         tokens.Add(new Token("Instagram.URL", _storeInformationSettings.InstagramLink));
+        tokens.Add(new Token("TikTok.URL", _storeInformationSettings.TikTokLink));
+        tokens.Add(new Token("Snapchat.URL", _storeInformationSettings.SnapchatLink));
+        tokens.Add(new Token("Pinterest.URL", _storeInformationSettings.PinterestLink));
+        tokens.Add(new Token("Tumblr.URL", _storeInformationSettings.TumblrLink));
 
         //event notification
         await _eventPublisher.EntityTokensAddedAsync(store, tokens);
@@ -1099,18 +1064,22 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         var paymentMethodName = paymentMethod != null ? await _localizationService.GetLocalizedFriendlyNameAsync(paymentMethod, languageId) : order.PaymentMethodSystemName;
         tokens.Add(new Token("Order.PaymentMethod", paymentMethodName));
         tokens.Add(new Token("Order.VatNumber", order.VatNumber));
-        var sbCustomValues = new StringBuilder();
-        var customValues = CommonHelper.DeserializeCustomValuesFromXml(order.CustomValuesXml);
-        if (customValues != null)
+        
+        var customValues = new CustomValues();
+        customValues.FillByXml(order.CustomValuesXml, true);
+
+        foreach (var displayLocation in Enum.GetValues<CustomValueDisplayLocation>())
         {
-            foreach (var item in customValues)
+            var sbCustomValues = new StringBuilder();
+
+            foreach (var item in customValues.GetValuesByDisplayLocation(displayLocation))
             {
-                sbCustomValues.AppendFormat("{0}: {1}", WebUtility.HtmlEncode(item.Key), WebUtility.HtmlEncode(item.Value ?? string.Empty));
+                sbCustomValues.AppendFormat("{0}: {1}", WebUtility.HtmlEncode(item.Name), WebUtility.HtmlEncode(item.Value ?? string.Empty));
                 sbCustomValues.Append("<br />");
             }
-        }
 
-        tokens.Add(new Token("Order.CustomValues", sbCustomValues.ToString(), true));
+            tokens.Add(new Token($"Order.CustomValues.{displayLocation.ToString()}", sbCustomValues.ToString(), true));
+        }
 
         tokens.Add(new Token("Order.Product(s)", await ProductListToHtmlTableAsync(order, languageId, vendorId), true));
 
@@ -1122,11 +1091,9 @@ public partial class MessageTokenProvider : IMessageTokenProvider
             tokens.Add(new Token("Order.CreatedOn", createdOn.ToString("D", new CultureInfo(language.LanguageCulture))));
         }
         else
-        {
             tokens.Add(new Token("Order.CreatedOn", order.CreatedOnUtc.ToString("D")));
-        }
 
-        var orderUrl = await RouteUrlAsync(order.StoreId, "OrderDetails", new { orderId = order.Id });
+        var orderUrl = await RouteUrlAsync(order.StoreId, NopRouteNames.Standard.ORDER_DETAILS, new { orderId = order.Id });
         tokens.Add(new Token("Order.OrderURLForCustomer", orderUrl, true));
 
         //event notification
@@ -1178,7 +1145,7 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         tokens.Add(new Token("Shipment.TrackingNumberURL", trackingNumberUrl, true));
         tokens.Add(new Token("Shipment.Product(s)", await ProductListToHtmlTableAsync(shipment, languageId), true));
 
-        var shipmentUrl = await RouteUrlAsync((await _orderService.GetOrderByIdAsync(shipment.OrderId)).StoreId, "ShipmentDetails", new { shipmentId = shipment.Id });
+        var shipmentUrl = await RouteUrlAsync((await _orderService.GetOrderByIdAsync(shipment.OrderId)).StoreId, NopRouteNames.Standard.SHIPMENT_DETAILS, new { shipmentId = shipment.Id });
         tokens.Add(new Token("Shipment.URLForCustomer", shipmentUrl, true));
 
         //event notification
@@ -1196,7 +1163,7 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         var order = await _orderService.GetOrderByIdAsync(orderNote.OrderId);
 
         tokens.Add(new Token("Order.NewNoteText", _orderService.FormatOrderNoteText(orderNote), true));
-        var orderNoteAttachmentUrl = await RouteUrlAsync(order.StoreId, "GetOrderNoteFile", new { ordernoteid = orderNote.Id });
+        var orderNoteAttachmentUrl = await RouteUrlAsync(order.StoreId, NopRouteNames.Standard.GET_ORDER_NOTE_FILE, new { ordernoteid = orderNote.Id });
         tokens.Add(new Token("Order.OrderNoteAttachmentUrl", orderNoteAttachmentUrl, true));
 
         //event notification
@@ -1239,8 +1206,8 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         tokens.Add(new Token("ReturnRequest.Product.Name", await _localizationService.GetLocalizedAsync(product, x => x.Name, languageId)));
         tokens.Add(new Token("ReturnRequest.Reason", returnRequest.ReasonForReturn));
         tokens.Add(new Token("ReturnRequest.RequestedAction", returnRequest.RequestedAction));
-        tokens.Add(new Token("ReturnRequest.CustomerComment", _htmlFormatter.FormatText(returnRequest.CustomerComments, false, true, false, false, false, false), true));
-        tokens.Add(new Token("ReturnRequest.StaffNotes", _htmlFormatter.FormatText(returnRequest.StaffNotes, false, true, false, false, false, false), true));
+        tokens.Add(new Token("ReturnRequest.CustomerComment", _htmlFormatter.FormatText(returnRequest.CustomerComments), true));
+        tokens.Add(new Token("ReturnRequest.StaffNotes", _htmlFormatter.FormatText(returnRequest.StaffNotes), true));
         tokens.Add(new Token("ReturnRequest.Status", await _localizationService.GetLocalizedEnumAsync(returnRequest.ReturnRequestStatus, languageId)));
 
         //event notification
@@ -1266,7 +1233,7 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         tokens.Add(new Token("GiftCard.CouponCode", giftCard.GiftCardCouponCode));
 
         var giftCardMessage = !string.IsNullOrWhiteSpace(giftCard.Message) ?
-            _htmlFormatter.FormatText(giftCard.Message, false, true, false, false, false, false) : string.Empty;
+            _htmlFormatter.FormatText(giftCard.Message) : string.Empty;
 
         tokens.Add(new Token("GiftCard.Message", giftCardMessage, true));
 
@@ -1310,15 +1277,14 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         tokens.Add(new Token("Customer.CustomAttributes", await _customerAttributeFormatter.FormatAttributesAsync(customAttributesXml), true));
 
         //note: we do not use SEO friendly URLS for these links because we can get errors caused by having .(dot) in the URL (from the email address)
-        var passwordRecoveryUrl = await RouteUrlAsync(routeName: "PasswordRecoveryConfirm", routeValues: new { token = await _genericAttributeService.GetAttributeAsync<string>(customer, NopCustomerDefaults.PasswordRecoveryTokenAttribute), guid = customer.CustomerGuid });
-        var accountActivationUrl = await RouteUrlAsync(routeName: "AccountActivation", routeValues: new { token = await _genericAttributeService.GetAttributeAsync<string>(customer, NopCustomerDefaults.AccountActivationTokenAttribute), guid = customer.CustomerGuid });
-        var emailRevalidationUrl = await RouteUrlAsync(routeName: "EmailRevalidation", routeValues: new { token = await _genericAttributeService.GetAttributeAsync<string>(customer, NopCustomerDefaults.EmailRevalidationTokenAttribute), guid = customer.CustomerGuid });
-        var wishlistUrl = await RouteUrlAsync(routeName: "Wishlist", routeValues: new { customerGuid = customer.CustomerGuid });
+        var passwordRecoveryUrl = await RouteUrlAsync(routeName: NopRouteNames.Standard.PASSWORD_RECOVERY_CONFIRM, routeValues: new { token = await _genericAttributeService.GetAttributeAsync<string>(customer, NopCustomerDefaults.PasswordRecoveryTokenAttribute), guid = customer.CustomerGuid });
+        var accountActivationUrl = await RouteUrlAsync(routeName: NopRouteNames.Standard.ACCOUNT_ACTIVATION, routeValues: new { token = await _genericAttributeService.GetAttributeAsync<string>(customer, NopCustomerDefaults.AccountActivationTokenAttribute), guid = customer.CustomerGuid });
+        var emailRevalidationUrl = await RouteUrlAsync(routeName: NopRouteNames.Standard.EMAIL_REVALIDATION, routeValues: new { token = await _genericAttributeService.GetAttributeAsync<string>(customer, NopCustomerDefaults.EmailRevalidationTokenAttribute), guid = customer.CustomerGuid });
+        
         tokens.Add(new Token("Customer.PasswordRecoveryURL", passwordRecoveryUrl, true));
         tokens.Add(new Token("Customer.AccountActivationURL", accountActivationUrl, true));
         tokens.Add(new Token("Customer.EmailRevalidationURL", emailRevalidationUrl, true));
         tokens.Add(new Token("Customer.Company", customer.Company));
-        tokens.Add(new Token("Wishlist.URLForCustomer", wishlistUrl, true));
 
         //event notification
         await _eventPublisher.EntityTokensAddedAsync(customer, tokens);
@@ -1352,10 +1318,10 @@ public partial class MessageTokenProvider : IMessageTokenProvider
     {
         tokens.Add(new Token("NewsLetterSubscription.Email", subscription.Email));
 
-        var activationUrl = await RouteUrlAsync(routeName: "NewsletterActivation", routeValues: new { token = subscription.NewsLetterSubscriptionGuid, active = "true" });
+        var activationUrl = await RouteUrlAsync(routeName: NopRouteNames.Standard.NEWSLETTER_ACTIVATION, routeValues: new { token = subscription.NewsLetterSubscriptionGuid, active = "true" });
         tokens.Add(new Token("NewsLetterSubscription.ActivationUrl", activationUrl, true));
 
-        var deactivationUrl = await RouteUrlAsync(routeName: "NewsletterActivation", routeValues: new { token = subscription.NewsLetterSubscriptionGuid, active = "false" });
+        var deactivationUrl = await RouteUrlAsync(routeName: NopRouteNames.Standard.NEWSLETTER_ACTIVATION, routeValues: new { token = subscription.NewsLetterSubscriptionGuid, active = "false" });
         tokens.Add(new Token("NewsLetterSubscription.DeactivationUrl", deactivationUrl, true));
 
         //event notification
@@ -1394,22 +1360,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
 
         //event notification
         await _eventPublisher.EntityTokensAddedAsync(blogComment, tokens);
-    }
-
-    /// <summary>
-    /// Add news comment tokens
-    /// </summary>
-    /// <param name="tokens">List of already added tokens</param>
-    /// <param name="newsComment">News comment</param>
-    /// <returns>A task that represents the asynchronous operation</returns>
-    public virtual async Task AddNewsCommentTokensAsync(IList<Token> tokens, NewsComment newsComment)
-    {
-        var newsItem = await _newsService.GetNewsByIdAsync(newsComment.NewsItemId);
-
-        tokens.Add(new Token("NewsComment.NewsTitle", newsItem.Title));
-
-        //event notification
-        await _eventPublisher.EntityTokensAddedAsync(newsComment, tokens);
     }
 
     /// <summary>
@@ -1468,79 +1418,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
     }
 
     /// <summary>
-    /// Add forum topic tokens
-    /// </summary>
-    /// <param name="tokens">List of already added tokens</param>
-    /// <param name="forumTopic">Forum topic</param>
-    /// <param name="friendlyForumTopicPageIndex">Friendly (starts with 1) forum topic page to use for URL generation</param>
-    /// <param name="appendedPostIdentifierAnchor">Forum post identifier</param>
-    /// <returns>A task that represents the asynchronous operation</returns>
-    public virtual async Task AddForumTopicTokensAsync(IList<Token> tokens, ForumTopic forumTopic,
-        int? friendlyForumTopicPageIndex = null, int? appendedPostIdentifierAnchor = null)
-    {
-        //attributes
-        //we cannot inject IForumService into constructor because it'll cause circular references.
-        //that's why we resolve it here this way
-        var forumService = EngineContext.Current.Resolve<IForumService>();
-
-        string topicUrl;
-        if (friendlyForumTopicPageIndex.HasValue && friendlyForumTopicPageIndex.Value > 1)
-            topicUrl = await RouteUrlAsync(routeName: "TopicSlugPaged", routeValues: new { id = forumTopic.Id, slug = await forumService.GetTopicSeNameAsync(forumTopic), pageNumber = friendlyForumTopicPageIndex.Value });
-        else
-            topicUrl = await RouteUrlAsync(routeName: "TopicSlug", routeValues: new { id = forumTopic.Id, slug = await forumService.GetTopicSeNameAsync(forumTopic) });
-        if (appendedPostIdentifierAnchor.HasValue && appendedPostIdentifierAnchor.Value > 0)
-            topicUrl = $"{topicUrl}#{appendedPostIdentifierAnchor.Value}";
-        tokens.Add(new Token("Forums.TopicURL", topicUrl, true));
-        tokens.Add(new Token("Forums.TopicName", forumTopic.Subject));
-
-        //event notification
-        await _eventPublisher.EntityTokensAddedAsync(forumTopic, tokens);
-    }
-
-    /// <summary>
-    /// Add forum post tokens
-    /// </summary>
-    /// <param name="tokens">List of already added tokens</param>
-    /// <param name="forumPost">Forum post</param>
-    /// <returns>A task that represents the asynchronous operation</returns>
-    public virtual async Task AddForumPostTokensAsync(IList<Token> tokens, ForumPost forumPost)
-    {
-        //attributes
-        //we cannot inject IForumService into constructor because it'll cause circular references.
-        //that's why we resolve it here this way
-        var forumService = EngineContext.Current.Resolve<IForumService>();
-
-        var customer = await _customerService.GetCustomerByIdAsync(forumPost.CustomerId);
-
-        tokens.Add(new Token("Forums.PostAuthor", await _customerService.FormatUsernameAsync(customer)));
-        tokens.Add(new Token("Forums.PostBody", forumService.FormatPostText(forumPost), true));
-
-        //event notification
-        await _eventPublisher.EntityTokensAddedAsync(forumPost, tokens);
-    }
-
-    /// <summary>
-    /// Add forum tokens
-    /// </summary>
-    /// <param name="tokens">List of already added tokens</param>
-    /// <param name="forum">Forum</param>
-    /// <returns>A task that represents the asynchronous operation</returns>
-    public virtual async Task AddForumTokensAsync(IList<Token> tokens, Forum forum)
-    {
-        //attributes
-        //we cannot inject IForumService into constructor because it'll cause circular references.
-        //that's why we resolve it here this way
-        var forumService = EngineContext.Current.Resolve<IForumService>();
-
-        var forumUrl = await RouteUrlAsync(routeName: "ForumSlug", routeValues: new { id = forum.Id, slug = await forumService.GetForumSeNameAsync(forum) });
-        tokens.Add(new Token("Forums.ForumURL", forumUrl, true));
-        tokens.Add(new Token("Forums.ForumName", forum.Name));
-
-        //event notification
-        await _eventPublisher.EntityTokensAddedAsync(forum, tokens);
-    }
-
-    /// <summary>
     /// Add private message tokens
     /// </summary>
     /// <param name="tokens">List of already added tokens</param>
@@ -1549,12 +1426,8 @@ public partial class MessageTokenProvider : IMessageTokenProvider
     public virtual async Task AddPrivateMessageTokensAsync(IList<Token> tokens, PrivateMessage privateMessage)
     {
         //attributes
-        //we cannot inject IForumService into constructor because it'll cause circular references.
-        //that's why we resolve it here this way
-        var forumService = EngineContext.Current.Resolve<IForumService>();
-
         tokens.Add(new Token("PrivateMessage.Subject", privateMessage.Subject));
-        tokens.Add(new Token("PrivateMessage.Text", forumService.FormatPrivateMessageText(privateMessage), true));
+        tokens.Add(new Token("PrivateMessage.Text", _customerService.FormatPrivateMessageText(privateMessage), true));
 
         //event notification
         await _eventPublisher.EntityTokensAddedAsync(privateMessage, tokens);
@@ -1590,7 +1463,7 @@ public partial class MessageTokenProvider : IMessageTokenProvider
         var additionalTokens = new CampaignAdditionalTokensAddedEvent();
         await _eventPublisher.PublishAsync(additionalTokens);
 
-        var allowedTokens = (await GetListOfAllowedTokensAsync(new[] { TokenGroupNames.StoreTokens, TokenGroupNames.SubscriptionTokens })).ToList();
+        var allowedTokens = (await GetListOfAllowedTokensAsync(tokenGroups: new[] { TokenGroupNames.StoreTokens, TokenGroupNames.SubscriptionTokens })).ToList();
         allowedTokens.AddRange(additionalTokens.AdditionalTokens);
 
         return allowedTokens.Distinct();
@@ -1599,17 +1472,20 @@ public partial class MessageTokenProvider : IMessageTokenProvider
     /// <summary>
     /// Get collection of allowed (supported) message tokens
     /// </summary>
+    /// <param name="messageTemplate">Message template</param>
     /// <param name="tokenGroups">Collection of token groups; pass null to get all available tokens</param>
     /// <returns>
     /// A task that represents the asynchronous operation
     /// The task result contains the collection of allowed message tokens
     /// </returns>
-    public virtual async Task<IEnumerable<string>> GetListOfAllowedTokensAsync(IEnumerable<string> tokenGroups = null)
+    public virtual async Task<IEnumerable<string>> GetListOfAllowedTokensAsync(MessageTemplate messageTemplate = null, IList<string> tokenGroups = null)
     {
         var additionalTokens = new AdditionalTokensAddedEvent
         {
-            TokenGroups = tokenGroups
+            TokenGroups = tokenGroups ?? (messageTemplate != null ? GetTokenGroups(messageTemplate).ToList() : new List<string>()),
+            MessageTemplate = messageTemplate,
         };
+
         await _eventPublisher.PublishAsync(additionalTokens);
 
         var allowedTokens = AllowedTokens.Where(x => tokenGroups == null || tokenGroups.Contains(x.Key))
@@ -1649,7 +1525,8 @@ public partial class MessageTokenProvider : IMessageTokenProvider
             MessageTemplateSystemNames.ORDER_COMPLETED_CUSTOMER_NOTIFICATION or
             MessageTemplateSystemNames.ORDER_COMPLETED_STORE_OWNER_NOTIFICATION or
             MessageTemplateSystemNames.ORDER_CANCELLED_VENDOR_NOTIFICATION or
-            MessageTemplateSystemNames.ORDER_CANCELLED_CUSTOMER_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.OrderTokens, TokenGroupNames.CustomerTokens],
+            MessageTemplateSystemNames.ORDER_CANCELLED_CUSTOMER_NOTIFICATION or
+            MessageTemplateSystemNames.ORDER_CANCELLED_STORE_OWNER_NOTIFICATION=> [TokenGroupNames.StoreTokens, TokenGroupNames.OrderTokens, TokenGroupNames.CustomerTokens],
 
             MessageTemplateSystemNames.SHIPMENT_SENT_CUSTOMER_NOTIFICATION or
             MessageTemplateSystemNames.SHIPMENT_READY_FOR_PICKUP_CUSTOMER_NOTIFICATION or
@@ -1674,8 +1551,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
             MessageTemplateSystemNames.NEW_RETURN_REQUEST_CUSTOMER_NOTIFICATION or
             MessageTemplateSystemNames.RETURN_REQUEST_STATUS_CHANGED_CUSTOMER_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.OrderTokens, TokenGroupNames.CustomerTokens, TokenGroupNames.ReturnRequestTokens],
 
-            MessageTemplateSystemNames.NEW_FORUM_TOPIC_MESSAGE => [TokenGroupNames.StoreTokens, TokenGroupNames.ForumTopicTokens, TokenGroupNames.ForumTokens, TokenGroupNames.CustomerTokens],
-            MessageTemplateSystemNames.NEW_FORUM_POST_MESSAGE => [TokenGroupNames.StoreTokens, TokenGroupNames.ForumPostTokens, TokenGroupNames.ForumTopicTokens, TokenGroupNames.ForumTokens, TokenGroupNames.CustomerTokens],
             MessageTemplateSystemNames.PRIVATE_MESSAGE_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.PrivateMessageTokens, TokenGroupNames.CustomerTokens],
             MessageTemplateSystemNames.NEW_VENDOR_ACCOUNT_APPLY_STORE_OWNER_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.CustomerTokens, TokenGroupNames.VendorTokens],
             MessageTemplateSystemNames.VENDOR_INFORMATION_CHANGE_STORE_OWNER_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.VendorTokens],
@@ -1690,7 +1565,6 @@ public partial class MessageTokenProvider : IMessageTokenProvider
             MessageTemplateSystemNames.QUANTITY_BELOW_ATTRIBUTE_COMBINATION_VENDOR_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.ProductTokens, TokenGroupNames.AttributeCombinationTokens],
             MessageTemplateSystemNames.NEW_VAT_SUBMITTED_STORE_OWNER_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.CustomerTokens, TokenGroupNames.VatValidation],
             MessageTemplateSystemNames.BLOG_COMMENT_STORE_OWNER_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.BlogCommentTokens, TokenGroupNames.CustomerTokens],
-            MessageTemplateSystemNames.NEWS_COMMENT_STORE_OWNER_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.NewsCommentTokens, TokenGroupNames.CustomerTokens],
             MessageTemplateSystemNames.BACK_IN_STOCK_NOTIFICATION => [TokenGroupNames.StoreTokens, TokenGroupNames.CustomerTokens, TokenGroupNames.ProductBackInStockTokens],
             MessageTemplateSystemNames.CONTACT_US_MESSAGE => [TokenGroupNames.StoreTokens, TokenGroupNames.ContactUs],
             MessageTemplateSystemNames.CONTACT_VENDOR_MESSAGE => [TokenGroupNames.StoreTokens, TokenGroupNames.ContactVendor],

@@ -1,4 +1,4 @@
-﻿using System.Data.Common;
+using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
 using FluentMigrator;
@@ -8,6 +8,7 @@ using LinqToDB.DataProvider;
 using LinqToDB.Tools;
 using Nop.Core;
 using Nop.Core.Infrastructure;
+using Nop.Data.Configuration;
 using Nop.Data.Mapping;
 using Nop.Data.Migrations;
 
@@ -16,6 +17,19 @@ namespace Nop.Data.DataProviders;
 public abstract partial class BaseDataProvider
 {
     #region Utilities
+
+    /// <summary>
+    /// Creates options used for bulk insert operations
+    /// </summary>
+    /// <returns>Bulk copy options derived from current data configuration</returns>
+    protected virtual BulkCopyOptions CreateBulkCopyOptions()
+    {
+        return new BulkCopyOptions
+        {
+            CheckConstraints = DataSettings.BulkCopyWithCheckConstraints,
+            KeepIdentity = true
+        };
+    }
 
     /// <summary>
     /// Gets a connection to the database for a current data provider
@@ -41,10 +55,17 @@ public abstract partial class BaseDataProvider
     {
         ArgumentNullException.ThrowIfNull(dataProvider);
 
-        var dataConnection = new DataConnection(dataProvider, CreateDbConnection(), NopMappingSchema.GetMappingSchema(ConfigurationName, LinqToDbDataProvider))
-        {
-            CommandTimeout = DataSettingsManager.GetSqlCommandTimeout()
-        };
+        var dataConnection = new DataConnection(
+            new DataOptions()
+            .UseConnection(dataProvider, CreateDbConnection())
+            .UseMappingSchema(NopMappingSchema.GetMappingSchema(ConfigurationName, LinqToDbDataProvider))
+            );
+
+        var sqlCommandTimeout = DataSettings.SQLCommandTimeout ?? -1;
+        if (sqlCommandTimeout == -1)
+            dataConnection.ResetCommandTimeout();
+        else
+            dataConnection.CommandTimeout = sqlCommandTimeout;
 
         return dataConnection;
     }
@@ -56,7 +77,7 @@ public abstract partial class BaseDataProvider
     /// <returns>Connection to a database</returns>
     protected virtual DbConnection CreateDbConnection(string connectionString = null)
     {
-        return GetInternalDbConnection(!string.IsNullOrEmpty(connectionString) ? connectionString : GetCurrentConnectionString());
+        return GetInternalDbConnection(!string.IsNullOrEmpty(connectionString) ? connectionString : DataSettings.ConnectionString);
     }
 
     /// <summary>
@@ -71,7 +92,7 @@ public abstract partial class BaseDataProvider
     protected virtual async Task<string> GetSqlStringValueAsync(string sql, params DataParameter[] parameters)
     {
         ArgumentException.ThrowIfNullOrEmpty(sql);
-        
+
         await using var dbConnection = CreateDbConnection();
         await using var command = dbConnection.CreateCommand();
         command.Connection = dbConnection;
@@ -80,7 +101,7 @@ public abstract partial class BaseDataProvider
         await dbConnection.OpenAsync();
 
         var value = await command.ExecuteScalarAsync();
-        
+
         return value?.ToString() ?? string.Empty;
     }
 
@@ -143,8 +164,6 @@ public abstract partial class BaseDataProvider
         return Task.FromResult<ITempDataStorage<TItem>>(new TempSqlDataStorage<TItem>(storeKey, query, CreateDataConnection()));
     }
 
-
-
     /// <summary>
     /// Get hash values of a stored entity field
     /// </summary>
@@ -157,17 +176,11 @@ public abstract partial class BaseDataProvider
         Expression<Func<TEntity, int>> keySelector,
         Expression<Func<TEntity, object>> fieldSelector) where TEntity : BaseEntity
     {
-        if (keySelector.Body is not MemberExpression keyMember ||
-            keyMember.Member is not PropertyInfo keyPropInfo)
-        {
+        if (keySelector.Body is not MemberExpression { Member: PropertyInfo keyPropInfo })
             throw new ArgumentException($"Expression '{keySelector}' refers to method or field, not a property.");
-        }
 
-        if (fieldSelector.Body is not MemberExpression member ||
-            member.Member is not PropertyInfo propInfo)
-        {
+        if (fieldSelector.Body is not MemberExpression { Member: PropertyInfo propInfo })
             throw new ArgumentException($"Expression '{fieldSelector}' refers to a method or field, not a property.");
-        }
 
         var hashes = GetTable<TEntity>()
             .Where(predicate)
@@ -189,14 +202,22 @@ public abstract partial class BaseDataProvider
     public virtual IQueryable<TEntity> GetTable<TEntity>() where TEntity : BaseEntity
     {
         var options = new DataOptions()
-            .UseConnectionString(LinqToDbDataProvider, GetCurrentConnectionString())
+            .UseConnectionString(LinqToDbDataProvider, DataSettings.ConnectionString)
             .UseMappingSchema(NopMappingSchema.GetMappingSchema(ConfigurationName, LinqToDbDataProvider));
 
-        return new DataContext(options)
+        var dataContext = new DataContext(options)
         {
-            CommandTimeout = DataSettingsManager.GetSqlCommandTimeout()
-        }
-        .GetTable<TEntity>();
+            CloseAfterUse = DataSettings.CloseDataContextAfterUse
+        };
+
+        var sqlCommandTimeout = DataSettings.SQLCommandTimeout ?? -1;
+
+        if (sqlCommandTimeout == -1)
+            dataContext.ResetCommandTimeout();
+        else
+            dataContext.CommandTimeout = sqlCommandTimeout;
+
+        return dataContext.GetTable<TEntity>();
     }
 
     /// <summary>
@@ -338,12 +359,16 @@ public abstract partial class BaseDataProvider
     {
         using var dataContext = CreateDataConnection();
         if (entities.All(entity => entity.Id == 0))
+        {
             foreach (var entity in entities)
                 dataContext.Delete(entity);
+        }
         else
+        {
             dataContext.GetTable<TEntity>()
                 .Where(e => e.Id.In(entities.Select(x => x.Id)))
                 .Delete();
+        }
     }
 
     /// <summary>
@@ -388,7 +413,7 @@ public abstract partial class BaseDataProvider
     public virtual async Task BulkInsertEntitiesAsync<TEntity>(IEnumerable<TEntity> entities) where TEntity : BaseEntity
     {
         using var dataContext = CreateDataConnection(LinqToDbDataProvider);
-        await dataContext.BulkCopyAsync(new BulkCopyOptions() { KeepIdentity = true }, entities.RetrieveIdentity(dataContext, useSequenceName: false));
+        await dataContext.BulkCopyAsync(CreateBulkCopyOptions(), entities.RetrieveIdentity(dataContext, useSequenceName: false));
     }
 
     /// <summary>
@@ -399,7 +424,7 @@ public abstract partial class BaseDataProvider
     public virtual void BulkInsertEntities<TEntity>(IEnumerable<TEntity> entities) where TEntity : BaseEntity
     {
         using var dataContext = CreateDataConnection(LinqToDbDataProvider);
-        dataContext.BulkCopy(new BulkCopyOptions() { KeepIdentity = true }, entities.RetrieveIdentity(dataContext, useSequenceName: false));
+        dataContext.BulkCopy(CreateBulkCopyOptions(), entities.RetrieveIdentity(dataContext, useSequenceName: false));
     }
 
     /// <summary>
@@ -460,10 +485,14 @@ public abstract partial class BaseDataProvider
     /// </summary>
     /// <param name="resetIdentity">Performs reset identity column</param>
     /// <typeparam name="TEntity">Entity type</typeparam>
-    public virtual async Task TruncateAsync<TEntity>(bool resetIdentity = false) where TEntity : BaseEntity
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the number of records, affected by command execution.
+    /// </returns>
+    public virtual async Task<int> TruncateAsync<TEntity>(bool resetIdentity = false) where TEntity : BaseEntity
     {
         using var dataContext = CreateDataConnection(LinqToDbDataProvider);
-        await dataContext.GetTable<TEntity>().TruncateAsync(resetIdentity);
+        return await dataContext.GetTable<TEntity>().TruncateAsync(resetIdentity);
     }
 
     #endregion
@@ -476,12 +505,9 @@ public abstract partial class BaseDataProvider
     protected abstract IDataProvider LinqToDbDataProvider { get; }
 
     /// <summary>
-    /// Database connection string
+    /// Gets the current data settings
     /// </summary>
-    protected static string GetCurrentConnectionString()
-    {
-        return DataSettingsManager.LoadSettings().ConnectionString;
-    }
+    protected DataConfig DataSettings => DataSettingsManager.LoadSettings();
 
     /// <summary>
     /// Name of database provider

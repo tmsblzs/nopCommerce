@@ -125,10 +125,8 @@ public partial class NopFileProvider : PhysicalFileProvider, INopFileProvider
         //find more info about directory deletion
         //and why we use this approach at https://stackoverflow.com/questions/329355/cannot-delete-directory-with-directory-deletepath-true
 
-        foreach (var directory in Directory.GetDirectories(path))
-        {
+        foreach (var directory in Directory.GetDirectories(path)) 
             DeleteDirectory(directory);
-        }
 
         try
         {
@@ -602,6 +600,17 @@ public partial class NopFileProvider : PhysicalFileProvider, INopFileProvider
         subpath = subpath.Replace(Root, string.Empty);
 
         return base.GetFileInfo(subpath);
+    }
+
+    /// <summary>
+    /// Tests if the given path contains a root. A path is considered rooted
+    /// if it starts with a backslash ("\") or a valid drive letter and a colon (":")
+    /// </summary>
+    /// <param name="path">Path to test</param>
+    /// <returns>true if path contains a root; otherwise, false</returns>
+    public virtual bool IsPathRooted(string path)
+    {
+        return !string.IsNullOrEmpty(path) && Path.IsPathRooted(path);
     }
 
     #endregion

@@ -4,13 +4,13 @@ using Nop.Core;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
-using Nop.Core.Domain.Forums;
 using Nop.Core.Domain.Gdpr;
 using Nop.Core.Domain.Media;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Security;
 using Nop.Core.Domain.Tax;
 using Nop.Core.Domain.Vendors;
+using Nop.Core.Http;
 using Nop.Services.Attributes;
 using Nop.Services.Authentication.External;
 using Nop.Services.Authentication.MultiFactor;
@@ -46,7 +46,6 @@ public partial class CustomerModelFactory : ICustomerModelFactory
     protected readonly CustomerSettings _customerSettings;
     protected readonly DateTimeSettings _dateTimeSettings;
     protected readonly ExternalAuthenticationSettings _externalAuthenticationSettings;
-    protected readonly ForumSettings _forumSettings;
     protected readonly GdprSettings _gdprSettings;
     protected readonly IAddressModelFactory _addressModelFactory;
     protected readonly IAttributeParser<CustomerAttribute, CustomerAttributeValue> _customerAttributeParser;
@@ -91,7 +90,6 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         CustomerSettings customerSettings,
         DateTimeSettings dateTimeSettings,
         ExternalAuthenticationSettings externalAuthenticationSettings,
-        ForumSettings forumSettings,
         GdprSettings gdprSettings,
         IAddressModelFactory addressModelFactory,
         IAttributeParser<CustomerAttribute, CustomerAttributeValue> customerAttributeParser,
@@ -134,7 +132,6 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         _externalAuthenticationModelFactory = externalAuthenticationModelFactory;
         _externalAuthenticationService = externalAuthenticationService;
         _externalAuthenticationSettings = externalAuthenticationSettings;
-        _forumSettings = forumSettings;
         _gdprSettings = gdprSettings;
         _addressModelFactory = addressModelFactory;
         _customerAttributeParser = customerAttributeParser;
@@ -223,7 +220,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
             var dateOfBirth = customer.DateOfBirth;
             if (dateOfBirth.HasValue)
             {
-                var currentCalendar = CultureInfo.CurrentCulture.Calendar;
+                var currentCalendar = CultureInfo.CurrentCulture.DateTimeFormat.Calendar;
 
                 model.DateOfBirthDay = currentCalendar.GetDayOfMonth(dateOfBirth.Value);
                 model.DateOfBirthMonth = currentCalendar.GetMonth(dateOfBirth.Value);
@@ -254,7 +251,6 @@ public partial class CustomerModelFactory : ICustomerModelFactory
                 model.NewsLetterSubscriptions.Add(nsModel);
             }
 
-            model.Signature = await _genericAttributeService.GetAttributeAsync<string>(customer, NopCustomerDefaults.SignatureAttribute);
             model.Email = customer.Email;
             model.Username = customer.Username;
         }
@@ -294,9 +290,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
                     model.AvailableStates.Add(new SelectListItem { Text = await _localizationService.GetResourceAsync("Address.SelectState"), Value = "0" });
 
                     foreach (var s in states)
-                    {
                         model.AvailableStates.Add(new SelectListItem { Text = await _localizationService.GetLocalizedAsync(s, x => x.Name), Value = s.Id.ToString(), Selected = (s.Id == model.StateProvinceId) });
-                    }
                 }
                 else
                 {
@@ -347,7 +341,6 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         model.UsernamesEnabled = _customerSettings.UsernamesEnabled;
         model.AllowUsersToChangeUsernames = _customerSettings.AllowUsersToChangeUsernames;
         model.CheckUsernameAvailabilityEnabled = _customerSettings.CheckUsernameAvailabilityEnabled;
-        model.SignatureEnabled = _forumSettings.ForumsEnabled && _forumSettings.SignaturesEnabled;
 
         //external authentication
         var currentCustomer = await _workContext.GetCurrentCustomerAsync();
@@ -497,9 +490,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
                     model.AvailableStates.Add(new SelectListItem { Text = await _localizationService.GetResourceAsync("Address.SelectState"), Value = "0" });
 
                     foreach (var s in states)
-                    {
                         model.AvailableStates.Add(new SelectListItem { Text = await _localizationService.GetLocalizedAsync(s, x => x.Name), Value = s.Id.ToString(), Selected = (s.Id == model.StateProvinceId) });
-                    }
                 }
                 else
                 {
@@ -525,9 +516,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             var consents = (await _gdprService.GetAllConsentsAsync()).Where(consent => consent.DisplayDuringRegistration).ToList();
             foreach (var consent in consents)
-            {
                 model.GdprConsents.Add(await PrepareGdprConsentModelAsync(consent, false));
-            }
         }
 
         return model;
@@ -614,7 +603,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
 
         model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
         {
-            RouteName = "CustomerInfo",
+            RouteName = NopRouteNames.General.CUSTOMER_INFO,
             Title = await _localizationService.GetResourceAsync("Account.CustomerInfo"),
             Tab = (int)CustomerNavigationEnum.Info,
             ItemClass = "customer-info"
@@ -622,7 +611,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
 
         model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
         {
-            RouteName = "CustomerAddresses",
+            RouteName = NopRouteNames.General.CUSTOMER_ADDRESSES,
             Title = await _localizationService.GetResourceAsync("Account.CustomerAddresses"),
             Tab = (int)CustomerNavigationEnum.Addresses,
             ItemClass = "customer-addresses"
@@ -630,7 +619,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
 
         model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
         {
-            RouteName = "CustomerOrders",
+            RouteName = NopRouteNames.General.CUSTOMER_ORDERS,
             Title = await _localizationService.GetResourceAsync("Account.CustomerOrders"),
             Tab = (int)CustomerNavigationEnum.Orders,
             ItemClass = "customer-orders"
@@ -638,7 +627,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
 
         model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
         {
-            RouteName = "CustomerRecurringPayments",
+            RouteName = NopRouteNames.Standard.CUSTOMER_RECURRING_PAYMENTS,
             Title = await _localizationService.GetResourceAsync("Account.CustomerRecurringPayments"),
             Tab = (int)CustomerNavigationEnum.RecurringPayments,
             ItemClass = "customer-recurring-payments"
@@ -653,7 +642,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "CustomerReturnRequests",
+                RouteName = NopRouteNames.Standard.CUSTOMER_RETURN_REQUESTS,
                 Title = await _localizationService.GetResourceAsync("Account.CustomerReturnRequests"),
                 Tab = (int)CustomerNavigationEnum.ReturnRequests,
                 ItemClass = "return-requests"
@@ -664,7 +653,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "CustomerDownloadableProducts",
+                RouteName = NopRouteNames.Standard.CUSTOMER_DOWNLOADABLE_PRODUCTS,
                 Title = await _localizationService.GetResourceAsync("Account.DownloadableProducts"),
                 Tab = (int)CustomerNavigationEnum.DownloadableProducts,
                 ItemClass = "downloadable-products"
@@ -675,7 +664,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "CustomerBackInStockSubscriptions",
+                RouteName = NopRouteNames.Standard.CUSTOMER_BACK_IN_STOCK_SUBSCRIPTIONS,
                 Title = await _localizationService.GetResourceAsync("Account.BackInStockSubscriptions"),
                 Tab = (int)CustomerNavigationEnum.BackInStockSubscriptions,
                 ItemClass = "back-in-stock-subscriptions"
@@ -686,7 +675,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "CustomerRewardPoints",
+                RouteName = NopRouteNames.Standard.CUSTOMER_REWARD_POINTS,
                 Title = await _localizationService.GetResourceAsync("Account.RewardPoints"),
                 Tab = (int)CustomerNavigationEnum.RewardPoints,
                 ItemClass = "reward-points"
@@ -695,7 +684,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
 
         model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
         {
-            RouteName = "CustomerChangePassword",
+            RouteName = NopRouteNames.Standard.CUSTOMER_CHANGE_PASSWORD,
             Title = await _localizationService.GetResourceAsync("Account.ChangePassword"),
             Tab = (int)CustomerNavigationEnum.ChangePassword,
             ItemClass = "change-password"
@@ -705,28 +694,18 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "CustomerAvatar",
+                RouteName = NopRouteNames.Standard.CUSTOMER_AVATAR,
                 Title = await _localizationService.GetResourceAsync("Account.Avatar"),
                 Tab = (int)CustomerNavigationEnum.Avatar,
                 ItemClass = "customer-avatar"
             });
         }
 
-        if (_forumSettings.ForumsEnabled && _forumSettings.AllowCustomersToManageSubscriptions)
-        {
-            model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
-            {
-                RouteName = "CustomerForumSubscriptions",
-                Title = await _localizationService.GetResourceAsync("Account.ForumSubscriptions"),
-                Tab = (int)CustomerNavigationEnum.ForumSubscriptions,
-                ItemClass = "forum-subscriptions"
-            });
-        }
         if (_catalogSettings.ShowProductReviewsTabOnAccountPage)
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "CustomerProductReviews",
+                RouteName = NopRouteNames.Standard.CUSTOMER_PRODUCT_REVIEWS,
                 Title = await _localizationService.GetResourceAsync("Account.CustomerProductReviews"),
                 Tab = (int)CustomerNavigationEnum.ProductReviews,
                 ItemClass = "customer-reviews"
@@ -736,7 +715,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "CustomerVendorInfo",
+                RouteName = NopRouteNames.Standard.CUSTOMER_VENDOR_INFO,
                 Title = await _localizationService.GetResourceAsync("Account.VendorInfo"),
                 Tab = (int)CustomerNavigationEnum.VendorInfo,
                 ItemClass = "customer-vendor-info"
@@ -746,7 +725,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "GdprTools",
+                RouteName = NopRouteNames.Standard.GDPR_TOOLS,
                 Title = await _localizationService.GetResourceAsync("Account.Gdpr"),
                 Tab = (int)CustomerNavigationEnum.GdprTools,
                 ItemClass = "customer-gdpr"
@@ -757,7 +736,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "CheckGiftCardBalance",
+                RouteName = NopRouteNames.General.CHECK_GIFT_CARD_BALANCE,
                 Title = await _localizationService.GetResourceAsync("CheckGiftCardBalance"),
                 Tab = (int)CustomerNavigationEnum.CheckGiftCardBalance,
                 ItemClass = "customer-check-gift-card-balance"
@@ -769,7 +748,7 @@ public partial class CustomerModelFactory : ICustomerModelFactory
         {
             model.CustomerNavigationItems.Add(new CustomerNavigationItemModel
             {
-                RouteName = "MultiFactorAuthenticationSettings",
+                RouteName = NopRouteNames.Standard.MULTI_FACTOR_AUTHENTICATION_SETTINGS,
                 Title = await _localizationService.GetResourceAsync("PageTitle.MultiFactorAuthentication"),
                 Tab = (int)CustomerNavigationEnum.MultiFactorAuthentication,
                 ItemClass = "customer-multiFactor-authentication"
@@ -1066,8 +1045,10 @@ public partial class CustomerModelFactory : ICustomerModelFactory
                         var selectedValues = await _customerAttributeParser.ParseAttributeValuesAsync(selectedAttributesXml);
                         foreach (var attributeValue in selectedValues)
                         foreach (var item in attributeModel.Values)
+                        {
                             if (attributeValue.Id == item.Id)
                                 item.IsPreSelected = true;
+                        }
                     }
                 }
                     break;

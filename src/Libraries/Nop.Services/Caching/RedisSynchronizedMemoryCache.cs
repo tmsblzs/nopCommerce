@@ -64,7 +64,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// <summary>
     /// Subscribe to perform some operation when a message to the preferred/active node is broadcast
     /// </summary>
-    protected void Subscribe()
+    protected virtual void Subscribe()
     {
         var channel = ChannelPrefix;
         var subscriber = _connection.GetSubscriber();
@@ -81,12 +81,15 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
                 return;
 
             if (keys.Any(key => key.Equals(CLEAR_CACHE_EVENT_KEY)))
+            {
                 foreach (var key in _keyManager.Keys.ToList())
                 {
                     _memoryCache.Remove(key);
                     _keyManager.RemoveKey(key);
                 }
+            }
             else
+            {
                 foreach (var key in keys)
                 {
                     if (key.StartsWith(REMOVE_BY_PREFIX_EVENT_KEY))
@@ -102,6 +105,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
                         _keyManager.RemoveKey(key);
                     }
                 }
+            }
         });
     }
 
@@ -114,7 +118,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// Enqueue or publish change event
     /// </summary>
     /// <param name="key">The evicted cache key to be published</param>
-    protected void PublishChangeEvent(object key)
+    protected virtual void PublishChangeEvent(object key)
     {
         var stringKey = key.ToString();
 
@@ -127,7 +131,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// <summary>
     /// Publish accumulated change events on key channel
     /// </summary>
-    protected void PublishQueuedChangeEvents()
+    protected virtual void PublishQueuedChangeEvents()
     {
         IEnumerable<string> getKeys()
         {
@@ -142,7 +146,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// Publish change events on key channel
     /// <param name="keys">The evicted entries to publish on the key channel.</param>
     /// </summary>
-    protected void BatchPublishChangeEvents(params string[] keys)
+    protected virtual void BatchPublishChangeEvents(params string[] keys)
     {
         if (keys.Length == 0)
             return;
@@ -161,7 +165,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// <param name="value">The value of the entry being evicted.</param>
     /// <param name="reason">The <see cref="EvictionReason"/>.</param>
     /// <param name="state">The information that was passed when registering the callback.</param>
-    protected void OnEviction(object key, object value, EvictionReason reason, object state)
+    protected virtual void OnEviction(object key, object value, EvictionReason reason, object state)
     {
         switch (reason)
         {
@@ -182,7 +186,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// </summary>
     /// <param name="key">An object identifying the entry.</param>
     /// <returns>The newly created <see cref="T:Microsoft.Extensions.Caching.Memory.ICacheEntry" /> instance.</returns>
-    public ICacheEntry CreateEntry(object key)
+    public virtual ICacheEntry CreateEntry(object key)
     {
         return _memoryCache.CreateEntry(key).RegisterPostEvictionCallback(OnEviction);
     }
@@ -191,7 +195,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// Removes the object associated with the given key.
     /// </summary>
     /// <param name="key">An object identifying the entry.</param>
-    public void Remove(object key)
+    public virtual void Remove(object key)
     {
         _memoryCache.Remove(key);
 
@@ -205,7 +209,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// <param name="key">An object identifying the requested entry.</param>
     /// <param name="value">The located value or null.</param>
     /// <returns>True if the key was found.</returns>
-    public bool TryGetValue(object key, out object value)
+    public virtual bool TryGetValue(object key, out object value)
     {
         return _memoryCache.TryGetValue(key, out value);
     }
@@ -214,7 +218,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// Clear all cache data
     /// </summary>
     /// <returns>A task that represents the asynchronous operation</returns>
-    public Task ClearCacheAsync()
+    public virtual Task ClearCacheAsync()
     {
         BatchPublishChangeEvents(CLEAR_CACHE_EVENT_KEY);
 
@@ -226,7 +230,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// </summary>
     /// <param name="prefix">Prefix to remove cache items</param>
     /// <returns>A task that represents the asynchronous operation</returns>
-    public Task RemoveByPrefixAsync(string prefix)
+    public virtual Task RemoveByPrefixAsync(string prefix)
     {
         BatchPublishChangeEvents($"{REMOVE_BY_PREFIX_EVENT_KEY}{prefix}__");
 
@@ -236,7 +240,7 @@ public partial class RedisSynchronizedMemoryCache : ISynchronizedMemoryCache
     /// <summary>
     /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
     /// </summary>
-    public void Dispose()
+    public virtual void Dispose()
     {
         if (!_disposed)
         {

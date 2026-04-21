@@ -4,9 +4,6 @@ using System.Text.RegularExpressions;
 using brevo_csharp.Api;
 using brevo_csharp.Client;
 using brevo_csharp.Model;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Infrastructure;
-using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Net.Http.Headers;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -15,15 +12,16 @@ using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Localization;
 using Nop.Core.Domain.Messages;
 using Nop.Plugin.Misc.Brevo.Domain;
-using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Customers;
 using Nop.Services.Directory;
+using Nop.Services.Helpers;
 using Nop.Services.Installation;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
 using Nop.Services.Messages;
 using Nop.Services.Stores;
+using Nop.Web.Framework.Mvc.Routing;
 using static brevo_csharp.Model.GetAttributesAttributes;
 
 namespace Nop.Plugin.Misc.Brevo.Services;
@@ -35,18 +33,16 @@ public partial class BrevoManager
 {
     #region Fields
 
-    protected readonly IActionContextAccessor _actionContextAccessor;
     protected readonly ICountryService _countryService;
     protected readonly ICustomerService _customerService;
     protected readonly IEmailAccountService _emailAccountService;
-    protected readonly IGenericAttributeService _genericAttributeService;
     protected readonly ILanguageService _languageService;
     protected readonly ILogger _logger;
     protected readonly INewsLetterSubscriptionService _newsLetterSubscriptionService;
+    protected readonly INopUrlHelper _nopUrlHelper;
     protected readonly ISettingService _settingService;
     protected readonly IStateProvinceService _stateProvinceService;
     protected readonly IStoreService _storeService;
-    protected readonly IUrlHelperFactory _urlHelperFactory;
     protected readonly IWebHelper _webHelper;
     protected readonly IWorkContext _workContext;
 
@@ -54,33 +50,29 @@ public partial class BrevoManager
 
     #region Ctor
 
-    public BrevoManager(IActionContextAccessor actionContextAccessor,
-        ICountryService countryService,
+    public BrevoManager(ICountryService countryService,
         ICustomerService customerService,
         IEmailAccountService emailAccountService,
-        IGenericAttributeService genericAttributeService,
         ILanguageService languageService,
         ILogger logger,
         INewsLetterSubscriptionService newsLetterSubscriptionService,
+        INopUrlHelper nopUrlHelper,
         ISettingService settingService,
         IStateProvinceService stateProvinceService,
         IStoreService storeService,
-        IUrlHelperFactory urlHelperFactory,
         IWebHelper webHelper,
         IWorkContext workContext)
     {
-        _actionContextAccessor = actionContextAccessor;
         _countryService = countryService;
         _customerService = customerService;
         _emailAccountService = emailAccountService;
-        _genericAttributeService = genericAttributeService;
         _languageService = languageService;
         _logger = logger;
         _newsLetterSubscriptionService = newsLetterSubscriptionService;
+        _nopUrlHelper = nopUrlHelper;
         _settingService = settingService;
         _stateProvinceService = stateProvinceService;
         _storeService = storeService;
-        _urlHelperFactory = urlHelperFactory;
         _webHelper = webHelper;
         _workContext = workContext;
     }
@@ -234,8 +226,7 @@ public partial class BrevoManager
                 }
 
                 //get notification URL
-                var urlHelper = _urlHelperFactory.GetUrlHelper(_actionContextAccessor.ActionContext);
-                var notificationUrl = urlHelper.RouteUrl(BrevoDefaults.ImportContactsRoute, null, _webHelper.GetCurrentRequestProtocol());
+                var notificationUrl = _nopUrlHelper.RouteUrl(BrevoDefaults.ImportContactsRoute, null, _webHelper.GetCurrentRequestProtocol());
 
                 //prepare CSV 
                 var title =
@@ -755,8 +746,7 @@ public partial class BrevoManager
             }
 
             //or create new one
-            var urlHelper = _urlHelperFactory.GetUrlHelper(_actionContextAccessor.ActionContext);
-            var notificationUrl = urlHelper.RouteUrl(BrevoDefaults.UnsubscribeContactRoute, null, _webHelper.GetCurrentRequestProtocol());
+            var notificationUrl = _nopUrlHelper.RouteUrl(BrevoDefaults.UnsubscribeContactRoute, null, _webHelper.GetCurrentRequestProtocol());
             var webhook = new CreateWebhook(notificationUrl, "Unsubscribe event webhook",
                 [CreateWebhook.EventsEnum.Unsubscribed], CreateWebhook.TypeEnum.Transactional);
             var result = await client.CreateWebhookAsync(webhook);
@@ -902,9 +892,7 @@ public partial class BrevoManager
                 return false;
 
             foreach (var storeCredential in storeCredentials)
-            {
                 await HttpBrevoClientAsync(storeCredential.Key, storeCredential.Value);
-            }
         }
         catch (Exception exception)
         {
@@ -1014,9 +1002,7 @@ public partial class BrevoManager
 
             //prepare id-name pairs
             foreach (var sender in senders.Senders)
-            {
                 availableSenders.Add((sender.Id.ToString(), $"{sender.Name} ({sender.Email})"));
-            }
         }
         catch (Exception exception)
         {
@@ -1214,9 +1200,7 @@ public partial class BrevoManager
             //prepare attributes to create
             var newAttributes = new List<(CategoryEnum category, string Name, string Value, CreateAttribute.TypeEnum? Type)>();
             foreach (var token in tokens)
-            {
                 newAttributes.Add((CategoryEnum.Transactional, token, null, CreateAttribute.TypeEnum.Text));
-            }
 
             return await CreateAttributesAsync(newAttributes);
         }

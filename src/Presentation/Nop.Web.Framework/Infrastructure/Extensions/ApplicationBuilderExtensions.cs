@@ -17,24 +17,26 @@ using Nop.Core;
 using Nop.Core.Configuration;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Localization;
+using Nop.Core.Domain.Media;
 using Nop.Core.Events;
 using Nop.Core.Http;
 using Nop.Core.Infrastructure;
 using Nop.Data;
 using Nop.Services.Authentication;
 using Nop.Services.Common;
+using Nop.Services.Helpers;
 using Nop.Services.Installation;
-using Nop.Services.Localization;
 using Nop.Services.Logging;
-using Nop.Services.Media.RoxyFileman;
+using Nop.Services.Media;
 using Nop.Services.Security;
 using Nop.Services.Seo;
+using Nop.Services.Themes;
 using Nop.Web.Framework.Globalization;
 using Nop.Web.Framework.Mvc.Routing;
 using Nop.Web.Framework.WebOptimizer;
 using WebMarkupMin.AspNetCoreLatest;
 using WebOptimizer;
-using IPNetwork = Microsoft.AspNetCore.HttpOverrides.IPNetwork;
+using IPNetwork = System.Net.IPNetwork;
 
 namespace Nop.Web.Framework.Infrastructure.Extensions;
 
@@ -294,6 +296,14 @@ public static class ApplicationBuilderExtensions
         //common static files
         application.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = staticFileResponse });
 
+        //images
+        application.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(fileProvider.GetLocalImagesPath(EngineContext.Current.Resolve<MediaSettings>())),
+            RequestPath = new PathString("/images"),
+            OnPrepareResponse = staticFileResponse
+        });
+
         //themes static files
         application.UseStaticFiles(new StaticFileOptions
         {
@@ -343,16 +353,6 @@ public static class ApplicationBuilderExtensions
             ContentTypeProvider = provider
         });
 
-        if (DataSettingsManager.IsDatabaseInstalled())
-        {
-            application.UseStaticFiles(new StaticFileOptions
-            {
-                FileProvider = EngineContext.Current.Resolve<IRoxyFilemanFileProvider>(),
-                RequestPath = new PathString(NopRoxyFilemanDefaults.DefaultRootDirectory),
-                OnPrepareResponse = staticFileResponse
-            });
-        }
-
         if (appSettings.Get<CommonConfig>().ServeUnknownFileTypes)
         {
             application.UseStaticFiles(new StaticFileOptions
@@ -371,6 +371,15 @@ public static class ApplicationBuilderExtensions
     public static void UseKeepAlive(this IApplicationBuilder application)
     {
         application.UseMiddleware<KeepAliveMiddleware>();
+    }
+
+    /// <summary>
+    /// Configure middleware storing the current user theme in the context
+    /// </summary>
+    /// <param name="application">Builder for configuring an application's request pipeline</param>
+    public static void UseThemes(this IApplicationBuilder application)
+    {
+        application.UseMiddleware<ThemesMiddleware>();
     }
 
     /// <summary>
@@ -405,11 +414,9 @@ public static class ApplicationBuilderExtensions
 
         var fileProvider = EngineContext.Current.Resolve<INopFileProvider>();
 
-        var fontPaths = fileProvider.EnumerateFiles(fileProvider.MapPath("~/App_Data/Pdf/"), "*.ttf") ?? Enumerable.Empty<string>();
+        var fontPaths = fileProvider.EnumerateFiles(fileProvider.MapPath(NopCommonDefaults.PdfFontDirectoryPath), "*.ttf") ?? Enumerable.Empty<string>();
         foreach (var fp in fontPaths)
-        {
             FontFactory.Register(fp, fileProvider.GetFileNameWithoutExtension(fp));
-        }
     }
 
     /// <summary>
@@ -423,14 +430,14 @@ public static class ApplicationBuilderExtensions
             if (!DataSettingsManager.IsDatabaseInstalled())
                 return;
 
-            var languageService = EngineContext.Current.Resolve<ILanguageService>();
             var localizationSettings = EngineContext.Current.Resolve<LocalizationSettings>();
+            var syncCodeHelper = EngineContext.Current.Resolve<ISyncCodeHelper>();
 
             //prepare supported cultures
-            var cultures = languageService
+            var cultures = syncCodeHelper
                 .GetAllLanguages()
                 .OrderBy(language => language.DisplayOrder)
-                .Select(language => new CultureInfo(language.LanguageCulture))
+                .Select(language => new CultureInfo(language.LanguageCulture) { DateTimeFormat = { Calendar = new GregorianCalendar() } })
                 .ToList();
             options.SupportedCultures = cultures;
             options.SupportedUICultures = cultures;
@@ -491,7 +498,7 @@ public static class ApplicationBuilderExtensions
             if (!string.IsNullOrEmpty(hostingConfig.ForwardedProtoHeaderName))
                 options.ForwardedProtoHeaderName = hostingConfig.ForwardedProtoHeaderName;
 
-            options.KnownNetworks.Clear();
+            options.KnownIPNetworks.Clear();
             options.KnownProxies.Clear();
 
             if (!string.IsNullOrEmpty(hostingConfig.KnownProxies))
@@ -511,12 +518,12 @@ public static class ApplicationBuilderExtensions
                     if (ipNetParts.Length == 2)
                     {
                         if (IPAddress.TryParse(ipNetParts[0], out var ip) && int.TryParse(ipNetParts[1], out var length))
-                            options.KnownNetworks.Add(new IPNetwork(ip, length));
+                            options.KnownIPNetworks.Add(new IPNetwork(ip, length));
                     }
                 }
             }
 
-            if (options.KnownProxies.Count > 1 || options.KnownNetworks.Count > 1)
+            if (options.KnownProxies.Count > 1 || options.KnownIPNetworks.Count > 1)
                 options.ForwardLimit = null; //disable the limit, because KnownProxies is configured
 
             //configure forwarding

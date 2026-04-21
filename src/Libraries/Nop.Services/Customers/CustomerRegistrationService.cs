@@ -1,12 +1,12 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Infrastructure;
-using Microsoft.AspNetCore.Mvc.Routing;
 using Nop.Core;
 using Nop.Core.Domain.Customers;
 using Nop.Core.Events;
+using Nop.Core.Http;
 using Nop.Services.Authentication;
 using Nop.Services.Authentication.MultiFactor;
 using Nop.Services.Common;
+using Nop.Services.Helpers;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
 using Nop.Services.Messages;
@@ -23,7 +23,6 @@ public partial class CustomerRegistrationService : ICustomerRegistrationService
     #region Fields
 
     protected readonly CustomerSettings _customerSettings;
-    protected readonly IActionContextAccessor _actionContextAccessor;
     protected readonly IAuthenticationService _authenticationService;
     protected readonly ICustomerActivityService _customerActivityService;
     protected readonly ICustomerService _customerService;
@@ -38,7 +37,7 @@ public partial class CustomerRegistrationService : ICustomerRegistrationService
     protected readonly IRewardPointService _rewardPointService;
     protected readonly IShoppingCartService _shoppingCartService;
     protected readonly IStoreContext _storeContext;
-    protected readonly IUrlHelperFactory _urlHelperFactory;
+    protected readonly IWebHelper _webHelper;
     protected readonly IWorkContext _workContext;
     protected readonly IWorkflowMessageService _workflowMessageService;
     protected readonly RewardPointsSettings _rewardPointsSettings;
@@ -48,7 +47,6 @@ public partial class CustomerRegistrationService : ICustomerRegistrationService
     #region Ctor
 
     public CustomerRegistrationService(CustomerSettings customerSettings,
-        IActionContextAccessor actionContextAccessor,
         IAuthenticationService authenticationService,
         ICustomerActivityService customerActivityService,
         ICustomerService customerService,
@@ -63,13 +61,12 @@ public partial class CustomerRegistrationService : ICustomerRegistrationService
         IRewardPointService rewardPointService,
         IShoppingCartService shoppingCartService,
         IStoreContext storeContext,
-        IUrlHelperFactory urlHelperFactory,
+        IWebHelper webHelper,
         IWorkContext workContext,
         IWorkflowMessageService workflowMessageService,
         RewardPointsSettings rewardPointsSettings)
     {
         _customerSettings = customerSettings;
-        _actionContextAccessor = actionContextAccessor;
         _authenticationService = authenticationService;
         _customerActivityService = customerActivityService;
         _customerService = customerService;
@@ -84,7 +81,7 @@ public partial class CustomerRegistrationService : ICustomerRegistrationService
         _rewardPointService = rewardPointService;
         _shoppingCartService = shoppingCartService;
         _storeContext = storeContext;
-        _urlHelperFactory = urlHelperFactory;
+        _webHelper = webHelper;
         _workContext = workContext;
         _workflowMessageService = workflowMessageService;
         _rewardPointsSettings = rewardPointsSettings;
@@ -449,13 +446,11 @@ public partial class CustomerRegistrationService : ICustomerRegistrationService
         await _customerActivityService.InsertActivityAsync(customer, "PublicStore.SuccessfulLogin",
             await _localizationService.GetResourceAsync("ActivityLog.PublicStore.Login.Success"), customer);
 
-        var urlHelper = _urlHelperFactory.GetUrlHelper(_actionContextAccessor.ActionContext);
-
         //redirect to the return URL if it's specified
-        if (!string.IsNullOrEmpty(returnUrl) && urlHelper.IsLocalUrl(returnUrl))
+        if (!string.IsNullOrEmpty(returnUrl) && _webHelper.CheckIsLocalUrl(returnUrl))
             return new RedirectResult(returnUrl);
 
-        return new RedirectToRouteResult("Homepage", null);
+        return new RedirectToRouteResult(NopRouteNames.General.HOMEPAGE, null);
     }
 
     /// <summary>

@@ -4,10 +4,10 @@ using Newtonsoft.Json;
 using Nop.Core;
 using Nop.Core.Domain.Configuration;
 using Nop.Core.Domain.Customers;
-using Nop.Core.Domain.Messages;
 using Nop.Core.Domain.Seo;
 using Nop.Core.Infrastructure;
 using Nop.Data;
+using Nop.Services.Helpers;
 using Nop.Services.Seo;
 
 namespace Nop.Services.Installation;
@@ -202,6 +202,7 @@ public partial class InstallationService : IInstallationService
         await InstallScheduleTasksAsync();
         await InstallReturnRequestReasonsAsync();
         await InstallReturnRequestActionsAsync();
+        await InstallMenusAsync();
 
         if (!installationSettings.InstallSampleData)
             return;
@@ -225,11 +226,8 @@ public partial class InstallationService : IInstallationService
         await InstallCategoriesAsync(sampleData.Categories);
         await InstallManufacturersAsync(sampleData.Manufacturers);
         await InstallProductsAsync(sampleData.Products);
-        await InstallForumsAsync(sampleData.ForumGroups);
         await InstallDiscountsAsync(sampleData.Discounts);
         await InstallBlogPostsAsync(sampleData.BlogPosts);
-        await InstallNewsAsync(sampleData.NewsItems);
-        await InstallPollsAsync(sampleData.Polls);
         await InstallWarehousesAsync(sampleData.Warehouses);
         await InstallVendorsAsync(sampleData.Vendors);
         await InstallAffiliatesAsync(sampleData.Affiliates);

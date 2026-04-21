@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc.Rendering;
 using Nop.Core.Domain.Catalog;
+using Nop.Services.Orders;
 using Nop.Web.Framework.Models;
 using Nop.Web.Models.Common;
 using Nop.Web.Models.Media;
@@ -177,7 +178,7 @@ public partial record ShoppingCartModel : BaseNopModel
             BillingAddress = new AddressModel();
             ShippingAddress = new AddressModel();
             PickupAddress = new AddressModel();
-            CustomValues = new Dictionary<string, string>();
+            CustomValues = new CustomValues();
         }
         public bool Display { get; set; }
 
@@ -189,9 +190,11 @@ public partial record ShoppingCartModel : BaseNopModel
         public AddressModel PickupAddress { get; set; }
         public string ShippingMethod { get; set; }
 
+        public string DesiredDeliveryDate { get; set; }
+
         public string PaymentMethod { get; set; }
 
-        public Dictionary<string, string> CustomValues { get; set; }
+        public CustomValues CustomValues { get; set; }
     }
 
     #endregion

@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Nop.Core.Domain.Tax;
+using Nop.Services.Orders;
 using Nop.Web.Areas.Admin.Models.Common;
 using Nop.Web.Framework.Models;
 using Nop.Web.Framework.Mvc.ModelBinding;
@@ -15,7 +16,7 @@ public partial record OrderModel : BaseNopEntityModel
 
     public OrderModel()
     {
-        CustomValues = new Dictionary<string, string>();
+        CustomValues = new CustomValues();
         TaxRates = new List<TaxRate>();
         GiftCards = new List<GiftCard>();
         Items = new List<OrderItemModel>();
@@ -56,7 +57,7 @@ public partial record OrderModel : BaseNopEntityModel
     public string CustomerIp { get; set; }
 
     [NopResourceDisplayName("Admin.Orders.Fields.CustomValues")]
-    public Dictionary<string, string> CustomValues { get; set; }
+    public CustomValues CustomValues { get; set; }
 
     [NopResourceDisplayName("Admin.Orders.Fields.Affiliate")]
     public int AffiliateId { get; set; }
@@ -181,6 +182,8 @@ public partial record OrderModel : BaseNopEntityModel
     public string ShippingStatus { get; set; }
     [NopResourceDisplayName("Admin.Orders.Fields.ShippingStatus")]
     public int ShippingStatusId { get; set; }
+    [NopResourceDisplayName("Admin.Orders.Fields.DesiredDeliveryDate")]
+    public string DesiredDeliveryDate { get; set; }
     [NopResourceDisplayName("Admin.Orders.Fields.ShippingAddress")]
     public AddressModel ShippingAddress { get; set; }
     [NopResourceDisplayName("Admin.Orders.Fields.ShippingMethod")]

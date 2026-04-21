@@ -5,17 +5,17 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Controllers;
-using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.Mvc.Rendering;
-using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Hosting;
 using Nop.Core;
 using Nop.Core.Configuration;
 using Nop.Core.Domain.Seo;
+using Nop.Services.Helpers;
 using Nop.Services.Localization;
 using Nop.Web.Framework.Mvc.Routing;
 using Nop.Web.Framework.WebOptimizer;
@@ -31,12 +31,12 @@ public partial class NopHtmlHelper : INopHtmlHelper
 
     protected readonly AppSettings _appSettings;
     protected readonly HtmlEncoder _htmlEncoder;
-    protected readonly IActionContextAccessor _actionContextAccessor;
     protected readonly IHtmlHelper _htmlHelper;
+    protected readonly IHttpContextAccessor _httpContextAccessor;
     protected readonly INopAssetHelper _bundleHelper;
     protected readonly Lazy<ILocalizationService> _localizationService;
     protected readonly IStoreContext _storeContext;
-    protected readonly IUrlHelperFactory _urlHelperFactory;
+    protected readonly IWebHelper _webHelper;
     protected readonly IWebHostEnvironment _webHostEnvironment;
     protected readonly SeoSettings _seoSettings;
 
@@ -60,23 +60,23 @@ public partial class NopHtmlHelper : INopHtmlHelper
 
     public NopHtmlHelper(AppSettings appSettings,
         HtmlEncoder htmlEncoder,
-        IActionContextAccessor actionContextAccessor,
         IHtmlHelper htmlHelper,
+        IHttpContextAccessor httpContextAccessor,
         INopAssetHelper bundleHelper,
         Lazy<ILocalizationService> localizationService,
         IStoreContext storeContext,
-        IUrlHelperFactory urlHelperFactory,
+        IWebHelper webHelper,
         IWebHostEnvironment webHostEnvironment,
         SeoSettings seoSettings)
     {
         _appSettings = appSettings;
         _htmlEncoder = htmlEncoder;
-        _actionContextAccessor = actionContextAccessor;
         _htmlHelper = htmlHelper;
+        _httpContextAccessor = httpContextAccessor;
         _bundleHelper = bundleHelper;
         _localizationService = localizationService;
         _storeContext = storeContext;
-        _urlHelperFactory = urlHelperFactory;
+        _webHelper = webHelper;
         _webHostEnvironment = webHostEnvironment;
         _seoSettings = seoSettings;
     }
@@ -98,6 +98,25 @@ public partial class NopHtmlHelper : INopHtmlHelper
             key += suffix;
 
         return key.ToLower();
+    }
+
+    /// <summary>
+    /// Get URL of "src" parameter and check whether it is local
+    /// </summary>
+    /// <param name="src">Src</param>
+    /// <returns>URL; check result</returns>
+    protected virtual (string Url, bool IsLocal) GetSrcUrl(string src)
+    {
+        var httpContext = _httpContextAccessor?.HttpContext;
+        if (httpContext == null)
+            return (src, false);
+
+        var isLocal = _webHelper.CheckIsLocalUrl(src);
+        var url = isLocal
+            ? src[1..].RemoveApplicationPathFromRawUrl(httpContext.Request.PathBase)
+            : src;
+
+        return (url, isLocal);
     }
 
     #endregion
@@ -146,28 +165,30 @@ public partial class NopHtmlHelper : INopHtmlHelper
         if (!string.IsNullOrEmpty(specificTitle))
         {
             if (addDefaultTitle)
+            {
                 //store name + page title
                 switch (_seoSettings.PageTitleSeoAdjustment)
                 {
                     case PageTitleSeoAdjustment.PagenameAfterStorename:
-                        {
-                            result = string.Join(_seoSettings.PageTitleSeparator, defaultTitle, specificTitle);
-                        }
+                        result = string.Join(_seoSettings.PageTitleSeparator, defaultTitle, specificTitle);
                         break;
                     case PageTitleSeoAdjustment.StorenameAfterPagename:
                     default:
-                        {
-                            result = string.Join(_seoSettings.PageTitleSeparator, specificTitle, defaultTitle);
-                        }
+                        result = string.Join(_seoSettings.PageTitleSeparator, specificTitle, defaultTitle);
                         break;
                 }
+            }
             else
+            {
                 //page title only
                 result = specificTitle;
+            }
         }
         else
+        {
             //store name only
             result = defaultTitle;
+        }
 
         return new HtmlString(_htmlEncoder.Encode(result ?? string.Empty));
     }
@@ -276,17 +297,12 @@ public partial class NopHtmlHelper : INopHtmlHelper
         if (!string.IsNullOrEmpty(debugSrc) && _webHostEnvironment.IsDevelopment())
             src = debugSrc;
 
-        ArgumentNullException.ThrowIfNull(_actionContextAccessor.ActionContext);
-
-        var urlHelper = _urlHelperFactory.GetUrlHelper(_actionContextAccessor.ActionContext);
-        var pathBase = _actionContextAccessor.ActionContext.HttpContext.Request.PathBase;
-        var isLocal = urlHelper.IsLocalUrl(src);
-
+        var (url, isLocal) = GetSrcUrl(src);
         _scriptParts[location].Add(new ScriptReferenceMeta
         {
             ExcludeFromBundle = excludeFromBundle,
             IsLocal = isLocal,
-            Src = isLocal ? urlHelper.Content(src).RemoveApplicationPathFromRawUrl(pathBase) : src
+            Src = url
         });
     }
 
@@ -308,17 +324,12 @@ public partial class NopHtmlHelper : INopHtmlHelper
         if (!string.IsNullOrEmpty(debugSrc) && _webHostEnvironment.IsDevelopment())
             src = debugSrc;
 
-        ArgumentNullException.ThrowIfNull(_actionContextAccessor.ActionContext);
-
-        var urlHelper = _urlHelperFactory.GetUrlHelper(_actionContextAccessor.ActionContext);
-        var pathBase = _actionContextAccessor.ActionContext.HttpContext.Request.PathBase;
-        var isLocal = urlHelper.IsLocalUrl(src);
-
+        var (url, isLocal) = GetSrcUrl(src);
         _scriptParts[location].Insert(0, new ScriptReferenceMeta
         {
             ExcludeFromBundle = excludeFromBundle,
             IsLocal = isLocal,
-            Src = isLocal ? urlHelper.Content(src).RemoveApplicationPathFromRawUrl(pathBase) : src
+            Src = url
         });
     }
 
@@ -337,7 +348,7 @@ public partial class NopHtmlHelper : INopHtmlHelper
 
         var result = new StringBuilder();
         var woConfig = _appSettings.Get<WebOptimizerConfig>();
-        var pathBase = _actionContextAccessor.ActionContext?.HttpContext.Request.PathBase ?? PathString.Empty;
+        var pathBase = _httpContextAccessor.HttpContext.Request.PathBase;
 
         if (woConfig.EnableJavaScriptBundling && value.Any(item => !item.ExcludeFromBundle))
         {
@@ -452,17 +463,12 @@ public partial class NopHtmlHelper : INopHtmlHelper
         if (!string.IsNullOrEmpty(debugSrc) && _webHostEnvironment.IsDevelopment())
             src = debugSrc;
 
-        ArgumentNullException.ThrowIfNull(_actionContextAccessor.ActionContext);
-
-        var urlHelper = _urlHelperFactory.GetUrlHelper(_actionContextAccessor.ActionContext);
-        var pathBase = _actionContextAccessor.ActionContext.HttpContext.Request.PathBase;
-        var isLocal = urlHelper.IsLocalUrl(src);
-
+        var (url, isLocal) = GetSrcUrl(src);
         _cssParts.Add(new CssReferenceMeta
         {
             ExcludeFromBundle = excludeFromBundle,
             IsLocal = isLocal,
-            Src = isLocal ? urlHelper.Content(src).RemoveApplicationPathFromRawUrl(pathBase) : src
+            Src = url
         });
     }
 
@@ -480,17 +486,12 @@ public partial class NopHtmlHelper : INopHtmlHelper
         if (!string.IsNullOrEmpty(debugSrc) && _webHostEnvironment.IsDevelopment())
             src = debugSrc;
 
-        ArgumentNullException.ThrowIfNull(_actionContextAccessor.ActionContext);
-
-        var urlHelper = _urlHelperFactory.GetUrlHelper(_actionContextAccessor.ActionContext);
-        var pathBase = _actionContextAccessor.ActionContext.HttpContext.Request.PathBase;
-        var isLocal = urlHelper.IsLocalUrl(src);
-
+        var (url, isLocal) = GetSrcUrl(src);
         _cssParts.Insert(0, new CssReferenceMeta
         {
             ExcludeFromBundle = excludeFromBundle,
             IsLocal = isLocal,
-            Src = isLocal ? urlHelper.Content(src).RemoveApplicationPathFromRawUrl(pathBase) : src
+            Src = url
         });
     }
 
@@ -503,12 +504,10 @@ public partial class NopHtmlHelper : INopHtmlHelper
         if (!_cssParts.Any())
             return HtmlString.Empty;
 
-        ArgumentNullException.ThrowIfNull(_actionContextAccessor.ActionContext);
-
         var result = new StringBuilder();
 
         var woConfig = _appSettings.Get<WebOptimizerConfig>();
-        var pathBase = _actionContextAccessor.ActionContext?.HttpContext.Request.PathBase ?? PathString.Empty;
+        var pathBase = _httpContextAccessor.HttpContext.Request.PathBase;
 
         if (woConfig.EnableCssBundling && _cssParts.Any(item => !item.ExcludeFromBundle))
         {
@@ -570,7 +569,8 @@ public partial class NopHtmlHelper : INopHtmlHelper
         if (withQueryString)
         {
             //add ordered query string parameters
-            var queryParameters = _actionContextAccessor.ActionContext.HttpContext.Request.Query.OrderBy(parameter => parameter.Key)
+            var queryParameters = _httpContextAccessor.HttpContext.Request.Query
+                .OrderBy(parameter => parameter.Key)
                 .ToDictionary(parameter => parameter.Key, parameter => parameter.Value.ToString());
             part = QueryHelpers.AddQueryString(part, queryParameters);
         }
@@ -733,12 +733,7 @@ public partial class NopHtmlHelper : INopHtmlHelper
     /// <returns>Route name</returns>
     public virtual string GetRouteName(bool handleDefaultRoutes = false)
     {
-        var actionContext = _actionContextAccessor.ActionContext;
-
-        if (actionContext is null)
-            return string.Empty;
-
-        var httpContext = actionContext.HttpContext;
+        var httpContext = _httpContextAccessor.HttpContext;
         var routeName = httpContext.GetEndpoint()?.Metadata.GetMetadata<RouteNameMetadata>()?.RouteName ?? string.Empty;
 
         if (!string.IsNullOrEmpty(routeName) && routeName != "areaRoute")
@@ -747,16 +742,23 @@ public partial class NopHtmlHelper : INopHtmlHelper
         //then try to get a generic one (actually it's an action name, not the route)
         if (httpContext.GetRouteValue(NopRoutingDefaults.RouteValue.SeName) is not null &&
             httpContext.GetRouteValue(NopRoutingDefaults.RouteValue.Action) is string actionName)
+        {
             return actionName;
+        }
 
         if (handleDefaultRoutes)
-            return actionContext.ActionDescriptor switch
+        {
+            var endpoint = httpContext.GetEndpoint();
+            var actionDescriptor = endpoint?.Metadata.GetMetadata<ActionDescriptor>();
+
+            return actionDescriptor switch
             {
                 ControllerActionDescriptor controllerAction => string.Concat(controllerAction.ControllerName, controllerAction.ActionName),
                 CompiledPageActionDescriptor compiledPage => string.Concat(compiledPage.AreaName, compiledPage.ViewEnginePath.Replace("/", "")),
                 PageActionDescriptor pageAction => string.Concat(pageAction.AreaName, pageAction.ViewEnginePath.Replace("/", "")),
-                _ => actionContext.ActionDescriptor.DisplayName?.Replace("/", "") ?? string.Empty
+                _ => actionDescriptor.DisplayName?.Replace("/", "") ?? string.Empty
             };
+        }
 
         return routeName;
     }

@@ -42,6 +42,11 @@ public static partial class MessageTemplateSystemNames
     /// </summary>
     public const string CUSTOMER_FAILED_LOGIN_ATTEMPT_NOTIFICATION = "Customer.FailedLoginAttempt";
 
+    /// <summary>
+    /// Represents system name of notification about new private message
+    /// </summary>
+    public const string PRIVATE_MESSAGE_NOTIFICATION = "Customer.NewPM";
+
     #endregion
 
     #region Order
@@ -120,6 +125,11 @@ public static partial class MessageTemplateSystemNames
     /// Represents system name of notification customer about cancelled order
     /// </summary>
     public const string ORDER_CANCELLED_CUSTOMER_NOTIFICATION = "OrderCancelled.CustomerNotification";
+
+    /// <summary>
+    /// Represents system name of notification store owner about cancelled order
+    /// </summary>
+    public const string ORDER_CANCELLED_STORE_OWNER_NOTIFICATION = "OrderCancelled.StoreOwnerNotification";
 
     /// <summary>
     /// Represents system name of notification vendor about cancelled order
@@ -205,25 +215,6 @@ public static partial class MessageTemplateSystemNames
 
     #endregion
 
-    #region Forum
-
-    /// <summary>
-    /// Represents system name of notification about new forum topic
-    /// </summary>
-    public const string NEW_FORUM_TOPIC_MESSAGE = "Forums.NewForumTopic";
-
-    /// <summary>
-    /// Represents system name of notification about new forum post
-    /// </summary>
-    public const string NEW_FORUM_POST_MESSAGE = "Forums.NewForumPost";
-
-    /// <summary>
-    /// Represents system name of notification about new private message
-    /// </summary>
-    public const string PRIVATE_MESSAGE_NOTIFICATION = "Customer.NewPM";
-
-    #endregion
-
     #region Misc
 
     /// <summary>
@@ -280,11 +271,6 @@ public static partial class MessageTemplateSystemNames
     /// Represents system name of notification store owner about new blog comment
     /// </summary>
     public const string BLOG_COMMENT_STORE_OWNER_NOTIFICATION = "Blog.BlogComment";
-
-    /// <summary>
-    /// Represents system name of notification store owner about new news comment
-    /// </summary>
-    public const string NEWS_COMMENT_STORE_OWNER_NOTIFICATION = "News.NewsComment";
 
     /// <summary>
     /// Represents system name of notification customer about product receipt

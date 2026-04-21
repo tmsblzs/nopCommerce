@@ -14,10 +14,10 @@ using Nop.Services.Html;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
 using Nop.Services.Messages;
+using Nop.Services.Themes;
 using Nop.Services.Vendors;
 using Nop.Web.Factories;
 using Nop.Web.Framework.Mvc.Filters;
-using Nop.Web.Framework.Themes;
 using Nop.Web.Models.Common;
 using Nop.Web.Models.Sitemap;
 
@@ -117,7 +117,7 @@ public partial class CommonController : BasePublicController
 
         //home page
         if (string.IsNullOrEmpty(returnUrl))
-            returnUrl = Url.RouteUrl("Homepage");
+            returnUrl = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
 
         //language part in URL
         if (_localizationSettings.SeoFriendlyUrlsForLanguagesEnabled)
@@ -134,7 +134,7 @@ public partial class CommonController : BasePublicController
 
         //prevent open redirection attack
         if (!Url.IsLocalUrl(returnUrl))
-            returnUrl = Url.RouteUrl("Homepage");
+            returnUrl = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
 
         return Redirect(returnUrl);
     }
@@ -149,11 +149,11 @@ public partial class CommonController : BasePublicController
 
         //home page
         if (string.IsNullOrEmpty(returnUrl))
-            returnUrl = Url.RouteUrl("Homepage");
+            returnUrl = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
 
         //prevent open redirection attack
         if (!Url.IsLocalUrl(returnUrl))
-            returnUrl = Url.RouteUrl("Homepage");
+            returnUrl = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
 
         return Redirect(returnUrl);
     }
@@ -167,11 +167,11 @@ public partial class CommonController : BasePublicController
 
         //home page
         if (string.IsNullOrEmpty(returnUrl))
-            returnUrl = Url.RouteUrl("Homepage");
+            returnUrl = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
 
         //prevent open redirection attack
         if (!Url.IsLocalUrl(returnUrl))
-            returnUrl = Url.RouteUrl("Homepage");
+            returnUrl = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
 
         return Redirect(returnUrl);
     }
@@ -195,16 +195,14 @@ public partial class CommonController : BasePublicController
     {
         //validate CAPTCHA
         if (_captchaSettings.Enabled && _captchaSettings.ShowOnContactUsPage && !captchaValid)
-        {
             ModelState.AddModelError("", await _localizationService.GetResourceAsync("Common.WrongCaptchaMessage"));
-        }
 
         model = await _commonModelFactory.PrepareContactUsModelAsync(model, true);
 
         if (ModelState.IsValid)
         {
             var subject = _commonSettings.SubjectFieldOnContactUsForm ? model.Subject : null;
-            var body = _htmlFormatter.FormatText(model.Enquiry, false, true, false, false, false, false);
+            var body = _htmlFormatter.FormatText(model.Enquiry);
 
             await _workflowMessageService.SendContactUsMessageAsync((await _workContext.GetWorkingLanguageAsync()).Id,
                 model.Email, model.FullName, subject, body);
@@ -226,11 +224,11 @@ public partial class CommonController : BasePublicController
     public virtual async Task<IActionResult> ContactVendor(int vendorId)
     {
         if (!_vendorSettings.AllowCustomersToContactVendors)
-            return RedirectToRoute("Homepage");
+            return RedirectToRoute(NopRouteNames.General.HOMEPAGE);
 
         var vendor = await _vendorService.GetVendorByIdAsync(vendorId);
         if (vendor == null || !vendor.Active || vendor.Deleted)
-            return RedirectToRoute("Homepage");
+            return RedirectToRoute(NopRouteNames.General.HOMEPAGE);
 
         var model = new ContactVendorModel();
         model = await _commonModelFactory.PrepareContactVendorModelAsync(model, vendor, false);
@@ -243,24 +241,22 @@ public partial class CommonController : BasePublicController
     public virtual async Task<IActionResult> ContactVendorSend(ContactVendorModel model, bool captchaValid)
     {
         if (!_vendorSettings.AllowCustomersToContactVendors)
-            return RedirectToRoute("Homepage");
+            return RedirectToRoute(NopRouteNames.General.HOMEPAGE);
 
         var vendor = await _vendorService.GetVendorByIdAsync(model.VendorId);
         if (vendor == null || !vendor.Active || vendor.Deleted)
-            return RedirectToRoute("Homepage");
+            return RedirectToRoute(NopRouteNames.General.HOMEPAGE);
 
         //validate CAPTCHA
         if (_captchaSettings.Enabled && _captchaSettings.ShowOnContactUsPage && !captchaValid)
-        {
             ModelState.AddModelError("", await _localizationService.GetResourceAsync("Common.WrongCaptchaMessage"));
-        }
 
         model = await _commonModelFactory.PrepareContactVendorModelAsync(model, vendor, true);
 
         if (ModelState.IsValid)
         {
             var subject = _commonSettings.SubjectFieldOnContactUsForm ? model.Subject : null;
-            var body = _htmlFormatter.FormatText(model.Enquiry, false, true, false, false, false, false);
+            var body = _htmlFormatter.FormatText(model.Enquiry);
 
             await _workflowMessageService.SendContactVendorMessageAsync(vendor, (await _workContext.GetWorkingLanguageAsync()).Id,
                 model.Email, model.FullName, subject, body);
@@ -278,7 +274,7 @@ public partial class CommonController : BasePublicController
     public virtual async Task<IActionResult> Sitemap(SitemapPageModel pageModel)
     {
         if (!_sitemapSettings.SitemapEnabled)
-            return RedirectToRoute("Homepage");
+            return RedirectToRoute(NopRouteNames.General.HOMEPAGE);
 
         var model = await _sitemapModelFactory.PrepareSitemapModelAsync(pageModel);
 
@@ -314,11 +310,11 @@ public partial class CommonController : BasePublicController
 
         //home page
         if (string.IsNullOrEmpty(returnUrl))
-            returnUrl = Url.RouteUrl("Homepage");
+            returnUrl = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
 
         //prevent open redirection attack
         if (!Url.IsLocalUrl(returnUrl))
-            returnUrl = Url.RouteUrl("Homepage");
+            returnUrl = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
 
         return Redirect(returnUrl);
     }
@@ -378,21 +374,21 @@ public partial class CommonController : BasePublicController
         //ensure it's invoked from our GenericPathRoute class
         if (!HttpContext.Items.TryGetValue(NopHttpDefaults.GenericRouteInternalRedirect, out var value) || value is not bool redirect || !redirect)
         {
-            url = Url.RouteUrl("Homepage");
+            url = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
             permanentRedirect = false;
         }
 
         //home page
         if (string.IsNullOrEmpty(url))
         {
-            url = Url.RouteUrl("Homepage");
+            url = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
             permanentRedirect = false;
         }
 
         //prevent open redirection attack
         if (!Url.IsLocalUrl(url))
         {
-            url = Url.RouteUrl("Homepage");
+            url = Url.RouteUrl(NopRouteNames.General.HOMEPAGE);
             permanentRedirect = false;
         }
 

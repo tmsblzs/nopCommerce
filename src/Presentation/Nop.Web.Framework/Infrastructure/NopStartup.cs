@@ -1,5 +1,4 @@
 ﻿using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Nop.Core;
@@ -9,6 +8,7 @@ using Nop.Core.Events;
 using Nop.Core.Infrastructure;
 using Nop.Data;
 using Nop.Services.Affiliates;
+using Nop.Services.ArtificialIntelligence;
 using Nop.Services.Attributes;
 using Nop.Services.Authentication;
 using Nop.Services.Authentication.External;
@@ -24,7 +24,7 @@ using Nop.Services.Directory;
 using Nop.Services.Discounts;
 using Nop.Services.Events;
 using Nop.Services.ExportImport;
-using Nop.Services.Forums;
+using Nop.Services.FilterLevels;
 using Nop.Services.Gdpr;
 using Nop.Services.Helpers;
 using Nop.Services.Html;
@@ -32,14 +32,13 @@ using Nop.Services.Installation;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
 using Nop.Services.Media;
-using Nop.Services.Media.RoxyFileman;
+using Nop.Services.Media.ElFinder;
+using Nop.Services.Menus;
 using Nop.Services.Messages;
-using Nop.Services.News;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Plugins;
 using Nop.Services.Plugins.Marketplace;
-using Nop.Services.Polls;
 using Nop.Services.ScheduleTasks;
 using Nop.Services.Security;
 using Nop.Services.Seo;
@@ -137,6 +136,7 @@ public partial class NopStartup : INopStartup
         //services
         services.AddScoped<IBackInStockSubscriptionService, BackInStockSubscriptionService>();
         services.AddScoped<ICategoryService, CategoryService>();
+        services.AddScoped<IFilterLevelValueService, FilterLevelValueService>();
         services.AddScoped<ICompareProductsService, CompareProductsService>();
         services.AddScoped<IRecentlyViewedProductsService, RecentlyViewedProductsService>();
         services.AddScoped<IManufacturerService, ManufacturerService>();
@@ -145,6 +145,7 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IProductAttributeParser, ProductAttributeParser>();
         services.AddScoped<IProductAttributeService, ProductAttributeService>();
         services.AddScoped<IProductService, ProductService>();
+        services.AddScoped<IProductReviewService, ProductReviewService>();
         services.AddScoped<ICopyProductService, CopyProductService>();
         services.AddScoped<ISpecificationAttributeService, SpecificationAttributeService>();
         services.AddScoped<IProductTemplateService, ProductTemplateService>();
@@ -154,6 +155,7 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IProductTagService, ProductTagService>();
         services.AddScoped<IAddressService, AddressService>();
         services.AddScoped<IAffiliateService, AffiliateService>();
+        services.AddScoped<IArtificialIntelligenceService, ArtificialIntelligenceService>();
         services.AddScoped<IVendorService, VendorService>();
         services.AddScoped<ISearchTermService, SearchTermService>();
         services.AddScoped<IGenericAttributeService, GenericAttributeService>();
@@ -197,6 +199,7 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IReturnRequestService, ReturnRequestService>();
         services.AddScoped<IRewardPointService, RewardPointService>();
         services.AddScoped<IShoppingCartService, ShoppingCartService>();
+        services.AddScoped<ICustomWishlistService, CustomWishlistService>();
         services.AddScoped<ICustomNumberFormatter, CustomNumberFormatter>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IEncryptionService, EncryptionService>();
@@ -204,18 +207,17 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IUrlRecordService, UrlRecordService>();
         services.AddScoped<IShipmentService, ShipmentService>();
         services.AddScoped<IShippingService, ShippingService>();
+        services.AddScoped<IWarehouseService, WarehouseService>();
+        services.AddScoped<IShippingMethodsService, ShippingMethodsService>();
         services.AddScoped<IDateRangeService, DateRangeService>();
         services.AddScoped<ITaxCategoryService, TaxCategoryService>();
         services.AddScoped<ICheckVatService, CheckVatService>();
         services.AddScoped<ITaxService, TaxService>();
         services.AddScoped<ILogger, DefaultLogger>();
         services.AddScoped<ICustomerActivityService, CustomerActivityService>();
-        services.AddScoped<IForumService, ForumService>();
         services.AddScoped<IGdprService, GdprService>();
-        services.AddScoped<IPollService, PollService>();
         services.AddScoped<IBlogService, BlogService>();
         services.AddScoped<ITopicService, TopicService>();
-        services.AddScoped<INewsService, NewsService>();
         services.AddScoped<IDateTimeHelper, DateTimeHelper>();
         services.AddScoped<INopHtmlHelper, NopHtmlHelper>();
         services.AddScoped<IScheduleTaskService, ScheduleTaskService>();
@@ -223,18 +225,19 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IImportManager, ImportManager>();
         services.AddScoped<IPdfService, PdfService>();
         services.AddScoped<IUploadService, UploadService>();
-        services.AddScoped<IThemeProvider, ThemeProvider>();
+        services.AddSingleton<IThemeProvider, ThemeProvider>();
         services.AddScoped<IThemeContext, ThemeContext>();
         services.AddScoped<IExternalAuthenticationService, ExternalAuthenticationService>();
         services.AddSingleton<IRoutePublisher, RoutePublisher>();
         services.AddScoped<IReviewTypeService, ReviewTypeService>();
         services.AddSingleton<IEventPublisher, EventPublisher>();
         services.AddScoped<ISettingService, SettingService>();
-        services.AddScoped<IBBCodeHelper, BBCodeHelper>();
         services.AddScoped<IHtmlFormatter, HtmlFormatter>();
         services.AddScoped<IVideoService, VideoService>();
         services.AddScoped<INopUrlHelper, NopUrlHelper>();
         services.AddScoped<IWidgetModelFactory, WidgetModelFactory>();
+        services.AddScoped<IMenuService, MenuService>();
+        services.AddScoped<ISyncCodeHelper, SyncCodeHelper>();
 
         //attribute services
         services.AddScoped(typeof(IAttributeService<,>), typeof(AttributeService<,>));
@@ -258,8 +261,6 @@ public partial class NopStartup : INopStartup
         services.AddScoped<ITaxPluginManager, TaxPluginManager>();
         services.AddScoped<ISearchPluginManager, SearchPluginManager>();
 
-        services.AddSingleton<IActionContextAccessor, ActionContextAccessor>();
-
         //register all settings
         var typeFinder = Singleton<ITypeFinder>.Instance;
 
@@ -269,7 +270,7 @@ public partial class NopStartup : INopStartup
             services.AddScoped(setting, serviceProvider =>
             {
                 var storeId = DataSettingsManager.IsDatabaseInstalled()
-                    ? serviceProvider.GetRequiredService<IStoreContext>().GetCurrentStore()?.Id ?? 0
+                    ? serviceProvider.GetRequiredService<IStoreContext>().GetCurrentStoreAsync().Result?.Id ?? 0
                     : 0;
 
                 return serviceProvider.GetRequiredService<ISettingService>().LoadSettingAsync(setting, storeId).Result;
@@ -282,9 +283,8 @@ public partial class NopStartup : INopStartup
         //picture service
         services.AddScoped<IPictureService, PictureService>();
 
-        //roxy file manager
-        services.AddScoped<IRoxyFilemanService, RoxyFilemanService>();
-        services.AddScoped<IRoxyFilemanFileProvider, RoxyFilemanFileProvider>();
+        //elFinder file manager
+        services.AddSingleton<IElFinderService, ElFinderService>();
 
         //installation service
         services.AddScoped<IInstallationService, InstallationService>();
@@ -320,7 +320,7 @@ public partial class NopStartup : INopStartup
     /// Configure the using of added middleware
     /// </summary>
     /// <param name="application">Builder for configuring an application's request pipeline</param>
-    public void Configure(IApplicationBuilder application)
+    public virtual void Configure(IApplicationBuilder application)
     {
     }
 
