@@ -433,14 +433,14 @@ public class UPSService
                 Code = _upsSettings.WeightType,
                 Description = _upsSettings.WeightType
             },
-            Weight = request.Shipment.Package.Sum(x => decimal.TryParse(x.PackageWeight.Weight, out var wt) ? wt : 0).ToString()
+            Weight = request.Shipment.Package.Sum(x => decimal.TryParse(x.PackageWeight.Weight, out var wt) ? wt : 0).ToString("F2", CultureInfo.InvariantCulture)
         };
 
         var currencyCode = (await _currencyService.GetCurrencyByIdAsync(_currencySettings.PrimaryStoreCurrencyId))?.CurrencyCode;
         request.Shipment.InvoiceLineTotal = new Shipment_InvoiceLineTotal
         {
             CurrencyCode = currencyCode,
-            MonetaryValue = shippingOptionRequest.Items.Sum(x => x.Product.Price * x.GetQuantity()).ToString("F2")
+            MonetaryValue = shippingOptionRequest.Items.Sum(x => x.Product.Price * x.GetQuantity()).ToString("F2", CultureInfo.InvariantCulture)
         };
 
         return request;
@@ -820,7 +820,7 @@ public class UPSService
         catch (API.Rates.ApiException<ErrorResponse> exception)
         {
             //log errors
-            var message = $"Error while getting UPS rates{Environment.NewLine}{string.Join(", ", exception.Result.Response.Errors.Select(p=>$"{p.Code}: {p.Message}"))}";
+            var message = $"Error while getting UPS rates{Environment.NewLine}{string.Join(", ", exception.Result.Response.Errors.Select(p => $"{p.Code}: {p.Message}"))}";
             await _logger.ErrorAsync(message, exception, shippingOptionRequest.Customer);
 
             return (new List<ShippingOption>(), message);

@@ -79,7 +79,7 @@ public partial class LocalizationService : ILocalizationService
         return locales;
     }
 
-    protected virtual HashSet<(string name, string value)> LoadLocaleResourcesFromStream(StreamReader xmlStreamReader, string language)
+    protected virtual HashSet<(string name, string value)> LoadLocaleResourcesFromStream(StreamReader xmlStreamReader)
     {
         var result = new HashSet<(string name, string value)>();
 
@@ -504,24 +504,28 @@ public partial class LocalizationService : ILocalizationService
             return;
 
         var lsNamesList = new Dictionary<string, LocaleStringResource>();
+        var locales = await _lsrRepository.Table
+            .Where(lsr => lsr.LanguageId == language.Id)
+            .OrderBy(lsr => lsr.Id)
+            .ToListAsync();
 
-        foreach (var localeStringResource in _lsrRepository.Table.Where(lsr => lsr.LanguageId == language.Id)
-                     .OrderBy(lsr => lsr.Id))
+        foreach (var localeStringResource in locales)
+        {
             lsNamesList[localeStringResource.ResourceName.ToLowerInvariant()] = localeStringResource;
+        }
 
-        var lrsToUpdateList = new List<LocaleStringResource>();
+        var lrsToUpdateList = new Dictionary<string, LocaleStringResource>();
         var lrsToInsertList = new Dictionary<string, LocaleStringResource>();
 
-        foreach (var (name, value) in LoadLocaleResourcesFromStream(xmlStreamReader, language.Name))
+        foreach (var (name, value) in LoadLocaleResourcesFromStream(xmlStreamReader))
         {
             if (lsNamesList.TryGetValue(name, out var localString))
             {
                 if (!updateExistingResources)
                     continue;
 
-                var lsr = localString;
-                lsr.ResourceValue = value;
-                lrsToUpdateList.Add(lsr);
+                localString.ResourceValue = value;
+                lrsToUpdateList[name] = localString;
             }
             else
             {
@@ -530,7 +534,7 @@ public partial class LocalizationService : ILocalizationService
             }
         }
 
-        await _lsrRepository.UpdateAsync(lrsToUpdateList, false);
+        await _lsrRepository.UpdateAsync(lrsToUpdateList.Values.ToList(), false);
         await _lsrRepository.InsertAsync(lrsToInsertList.Values.ToList(), false);
 
         //clear cache

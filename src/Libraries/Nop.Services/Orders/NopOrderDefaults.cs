@@ -1,5 +1,4 @@
 ﻿using Nop.Core.Caching;
-using Nop.Core.Domain.Orders;
 
 namespace Nop.Services.Orders;
 
@@ -19,7 +18,7 @@ public static partial class NopOrderDefaults
     /// {0} : store ID
     /// {1} : A value indicating whether we should exclude shippable attributes
     /// </remarks>
-    public static CacheKey CheckoutAttributesAllCacheKey => new("Nop.checkoutattribute.all.{0}-{1}", NopEntityCacheDefaults<CheckoutAttribute>.AllPrefix);
+    public static CacheKey CheckoutAttributesAllCacheKey => new("Nop.checkoutattribute.all.{0}-{1}");
 
     #endregion
 
@@ -35,8 +34,9 @@ public static partial class NopOrderDefaults
     /// {3} : product ID
     /// {4} : created from date
     /// {5} : created to date
+    /// {6} : custom wishlist ID
     /// </remarks>
-    public static CacheKey ShoppingCartItemsAllCacheKey => new("Nop.shoppingcartitem.all.{0}-{1}-{2}-{3}-{4}-{5}", ShoppingCartItemsByCustomerPrefix, NopEntityCacheDefaults<ShoppingCartItem>.AllPrefix);
+    public static CacheKey ShoppingCartItemsAllCacheKey => new("Nop.shoppingcartitem.all.{0}-{1}-{2}-{3}-{4}-{5}-{6}");
 
     /// <summary>
     /// Gets a key pattern to clear cache
@@ -45,7 +45,6 @@ public static partial class NopOrderDefaults
     /// {0} : customer identifier
     /// </remarks>
     public static string ShoppingCartItemsByCustomerPrefix => "Nop.shoppingcartitem.all.{0}";
-
 
     #endregion
 

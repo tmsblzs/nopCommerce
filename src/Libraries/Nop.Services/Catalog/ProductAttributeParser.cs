@@ -91,7 +91,7 @@ public partial class ProductAttributeParser : IProductAttributeParser
     /// <param name="attributesXml">Attributes in XML format</param>
     /// <param name="productAttributeMappingId">Product attribute mapping identifier</param>
     /// <returns>Collections of pairs of product attribute values and their quantity</returns>
-    protected IList<Tuple<string, string>> ParseValuesWithQuantity(string attributesXml, int productAttributeMappingId)
+    protected virtual IList<Tuple<string, string>> ParseValuesWithQuantity(string attributesXml, int productAttributeMappingId)
     {
         var selectedValues = new List<Tuple<string, string>>();
         if (string.IsNullOrEmpty(attributesXml))
@@ -903,15 +903,17 @@ public partial class ProductAttributeParser : IProductAttributeParser
 
         var customerEnteredPriceConverted = decimal.Zero;
         if (product.CustomerEntersPrice)
+        {
             foreach (var formKey in form.Keys)
             {
                 if (formKey.Equals($"addtocart_{product.Id}.CustomerEnteredPrice", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    if (decimal.TryParse(form[formKey], out var customerEnteredPrice))
+                    if (decimal.TryParse(form[formKey], NumberStyles.Any, CultureInfo.InvariantCulture, out var customerEnteredPrice))
                         customerEnteredPriceConverted = await _currencyService.ConvertToPrimaryStoreCurrencyAsync(customerEnteredPrice, await _workContext.GetWorkingCurrencyAsync());
                     break;
                 }
             }
+        }
 
         return customerEnteredPriceConverted;
     }
@@ -957,13 +959,18 @@ public partial class ProductAttributeParser : IProductAttributeParser
         {
             var ctrlStartDate = form[$"rental_start_date_{product.Id}"];
             var ctrlEndDate = form[$"rental_end_date_{product.Id}"];
+
+            var dateFormat = CultureInfo.CurrentCulture.TextInfo.IsRightToLeft ?
+                        CultureInfo.InvariantCulture.DateTimeFormat.ShortDatePattern :
+                        CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern;
+
             try
             {
                 startDate = DateTime.ParseExact(ctrlStartDate,
-                    CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern,
+                    dateFormat,
                     CultureInfo.InvariantCulture);
                 endDate = DateTime.ParseExact(ctrlEndDate,
-                    CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern,
+                    dateFormat,
                     CultureInfo.InvariantCulture);
             }
             catch
@@ -1011,7 +1018,7 @@ public partial class ProductAttributeParser : IProductAttributeParser
     /// <param name="senderEmail">Sender email</param>
     /// <param name="giftCardMessage">Message</param>
     /// <returns>Attributes</returns>
-    public string AddGiftCardAttribute(string attributesXml, string recipientName,
+    public virtual string AddGiftCardAttribute(string attributesXml, string recipientName,
         string recipientEmail, string senderName, string senderEmail, string giftCardMessage)
     {
         var result = string.Empty;
@@ -1079,7 +1086,7 @@ public partial class ProductAttributeParser : IProductAttributeParser
     /// <param name="senderName">Sender name</param>
     /// <param name="senderEmail">Sender email</param>
     /// <param name="giftCardMessage">Message</param>
-    public void GetGiftCardAttribute(string attributesXml, out string recipientName,
+    public virtual void GetGiftCardAttribute(string attributesXml, out string recipientName,
         out string recipientEmail, out string senderName,
         out string senderEmail, out string giftCardMessage)
     {
