@@ -1,12 +1,10 @@
-﻿using System.Globalization;
-using Microsoft.AspNetCore.Mvc.Rendering;
+﻿using Microsoft.AspNetCore.Mvc.Rendering;
 using Newtonsoft.Json;
 using Nop.Core;
 using Nop.Core.Caching;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
-using Nop.Core.Domain.Forums;
 using Nop.Core.Domain.Media;
 using Nop.Core.Domain.Seo;
 using Nop.Core.Domain.Vendors;
@@ -16,6 +14,7 @@ using Nop.Services.Common;
 using Nop.Services.Customers;
 using Nop.Services.Directory;
 using Nop.Services.FilterLevels;
+using Nop.Services.Helpers;
 using Nop.Services.Localization;
 using Nop.Services.Media;
 using Nop.Services.Seo;
@@ -34,7 +33,6 @@ public partial class CatalogModelFactory : ICatalogModelFactory
 
     protected readonly CatalogSettings _catalogSettings;
     protected readonly CustomerSettings _customerSettings;
-    protected readonly ForumSettings _forumSettings;
     protected readonly ICategoryService _categoryService;
     protected readonly ICategoryTemplateService _categoryTemplateService;
     protected readonly ICurrencyService _currencyService;
@@ -62,6 +60,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
     protected readonly IWebHelper _webHelper;
     protected readonly IWorkContext _workContext;
     protected readonly MediaSettings _mediaSettings;
+    protected readonly PrivateMessageSettings _privateMessageSettings;
     protected readonly SeoSettings _seoSettings;
     protected readonly VendorSettings _vendorSettings;
     private static readonly char[] _separator = [',', ' '];
@@ -72,7 +71,6 @@ public partial class CatalogModelFactory : ICatalogModelFactory
 
     public CatalogModelFactory(CatalogSettings catalogSettings,
         CustomerSettings customerSettings,
-        ForumSettings forumSettings,
         ICategoryService categoryService,
         ICategoryTemplateService categoryTemplateService,
         ICurrencyService currencyService,
@@ -100,12 +98,12 @@ public partial class CatalogModelFactory : ICatalogModelFactory
         IWebHelper webHelper,
         IWorkContext workContext,
         MediaSettings mediaSettings,
+        PrivateMessageSettings privateMessageSettings,
         SeoSettings seoSettings,
         VendorSettings vendorSettings)
     {
         _catalogSettings = catalogSettings;
         _customerSettings = customerSettings;
-        _forumSettings = forumSettings;
         _categoryService = categoryService;
         _categoryTemplateService = categoryTemplateService;
         _currencyService = currencyService;
@@ -133,6 +131,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
         _webHelper = webHelper;
         _workContext = workContext;
         _mediaSettings = mediaSettings;
+        _privateMessageSettings = privateMessageSettings;
         _seoSettings = seoSettings;
         _vendorSettings = vendorSettings;
     }
@@ -160,11 +159,11 @@ public partial class CatalogModelFactory : ICatalogModelFactory
         if (fromTo.Length == 2)
         {
             var rawFromPrice = fromTo[0]?.Trim();
-            if (!string.IsNullOrEmpty(rawFromPrice) && decimal.TryParse(rawFromPrice, NumberStyles.Any, CultureInfo.InvariantCulture, out var from))
+            if (!string.IsNullOrEmpty(rawFromPrice) && decimal.TryParse(rawFromPrice, out var from))
                 result.From = from;
 
             var rawToPrice = fromTo[1]?.Trim();
-            if (!string.IsNullOrEmpty(rawToPrice) && decimal.TryParse(rawToPrice, NumberStyles.Any, CultureInfo.InvariantCulture, out var to))
+            if (!string.IsNullOrEmpty(rawToPrice) && decimal.TryParse(rawToPrice, out var to))
                 result.To = to;
 
             if (result.From > result.To)
@@ -508,8 +507,10 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                 var categoryIds = new List<int> { category.Id };
                 //include subcategories
                 if (_catalogSettings.ShowCategoryProductNumberIncludingSubcategories)
+                {
                     categoryIds.AddRange(
                         await _categoryService.GetChildCategoryIdsAsync(category.Id, store.Id));
+                }
 
                 categoryModel.NumberOfProducts =
                     await _productService.GetNumberOfProductsInCategoryAsync(categoryIds, store.Id);
@@ -781,9 +782,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             .GetFiltrableSpecificationAttributeOptionsByCategoryIdAsync(category.Id);
 
         if (_catalogSettings.EnableSpecificationAttributeFiltering)
-        {
             model.SpecificationFilter = await PrepareSpecificationFilterModel(command.Specs, filterableOptions);
-        }
 
         //filterable manufacturers
         if (_catalogSettings.EnableManufacturerFiltering)
@@ -935,9 +934,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             .GetFiltrableSpecificationAttributeOptionsByManufacturerIdAsync(manufacturer.Id);
 
         if (_catalogSettings.EnableSpecificationAttributeFiltering)
-        {
             model.SpecificationFilter = await PrepareSpecificationFilterModel(command.Specs, filterableOptions);
-        }
 
         var filteredSpecs = command.Specs is null ? null : filterableOptions.Where(fo => command.Specs.Contains(fo.Id)).ToList();
 
@@ -1046,6 +1043,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                     SeName = await _urlRecordService.GetSeNameAsync(manufacturer),
                     IsActive = currentManufacturer != null && currentManufacturer.Id == manufacturer.Id,
                 };
+
                 model.Manufacturers.Add(modelMan);
             }
 
@@ -1089,7 +1087,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             ProductReviews = await PrepareVendorProductReviewsModelAsync(vendor, new VendorReviewsPagingFilteringModel())
         };
 
-        if (_forumSettings.AllowPrivateMessages)
+        if (_privateMessageSettings.AllowPrivateMessages)
             model.PmCustomerId = vendor.PmCustomerId;
 
         return model;
@@ -1594,12 +1592,14 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                 Text = await _localizationService.GetResourceAsync("Common.All")
             });
             foreach (var m in manufacturers)
+            {
                 model.AvailableManufacturers.Add(new SelectListItem
                 {
                     Value = m.Id.ToString(),
                     Text = await _localizationService.GetLocalizedAsync(m, x => x.Name),
                     Selected = model.mid == m.Id
                 });
+            }
         }
 
         model.asv = _vendorSettings.AllowSearchByVendor;
@@ -1614,12 +1614,14 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                     Text = await _localizationService.GetResourceAsync("Common.All")
                 });
                 foreach (var vendor in vendors)
+                {
                     model.AvailableVendors.Add(new SelectListItem
                     {
                         Value = vendor.Id.ToString(),
                         Text = await _localizationService.GetLocalizedAsync(vendor, x => x.Name),
                         Selected = model.vid == vendor.Id
                     });
+                }
             }
         }
 
@@ -1747,11 +1749,13 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                         };
                     }
                     else
+                    {
                         availablePriceRange = new PriceRangeModel
                         {
                             From = await getProductPriceAsync(ProductSortingEnum.PriceAsc),
                             To = await getProductPriceAsync(ProductSortingEnum.PriceDesc)
                         };
+                    }
 
                     model.PriceRangeFilter = await PreparePriceRangeFilterAsync(selectedPriceRange, availablePriceRange);
                 }
@@ -1776,23 +1780,14 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                 //search term statistics
                 if (!string.IsNullOrEmpty(searchTerms))
                 {
-                    var searchTerm =
-                        await _searchTermService.GetSearchTermByKeywordAsync(searchTerms, currentStore.Id);
-                    if (searchTerm != null)
+                    var customer = await _workContext.GetCurrentCustomerAsync();
+                    await _searchTermService.InsertSearchTermAsync(new SearchTerm
                     {
-                        searchTerm.Count++;
-                        await _searchTermService.UpdateSearchTermAsync(searchTerm);
-                    }
-                    else
-                    {
-                        searchTerm = new SearchTerm
-                        {
-                            Keyword = searchTerms,
-                            StoreId = currentStore.Id,
-                            Count = 1
-                        };
-                        await _searchTermService.InsertSearchTermAsync(searchTerm);
-                    }
+                        Keyword = searchTerms,
+                        StoreId = currentStore.Id,
+                        CustomerId = customer.Id,
+                        CreatedOnUtc = DateTime.UtcNow
+                    });
                 }
 
                 //event
@@ -1860,9 +1855,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
         {
             var filterLevelValue = (await _filterLevelValueService.GetAllFilterLevelValuesAsync(flv1, flv2, flv3)).FirstOrDefault();
             if (filterLevelValue == null)
-            {
                 return model;
-            }
 
             var store = await _storeContext.GetCurrentStoreAsync();
 
@@ -1896,6 +1889,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             SearchTermMinimumLength = _catalogSettings.ProductSearchTermMinimumLength,
             ShowSearchBox = _catalogSettings.ProductSearchEnabled,
             ShowSearchBoxCategories = _catalogSettings.ShowSearchBoxCategories,
+            SearchHistoryEnabled = _catalogSettings.ShowSearchTermHistory
         };
 
         if (_catalogSettings.ShowSearchBoxCategories)
@@ -2078,9 +2072,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
 
         //ensure pge size is specified
         if (command.PageSize <= 0)
-        {
             command.PageSize = fixedPageSize;
-        }
 
         return Task.CompletedTask;
     }

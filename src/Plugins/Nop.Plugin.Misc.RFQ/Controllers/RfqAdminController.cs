@@ -1,7 +1,8 @@
-﻿using System.Globalization;
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Nop.Core;
 using Nop.Core.Domain.Orders;
+using Nop.Core.Domain.Security;
 using Nop.Plugin.Misc.RFQ.Domains;
 using Nop.Plugin.Misc.RFQ.Factories;
 using Nop.Plugin.Misc.RFQ.Models.Admin;
@@ -30,6 +31,7 @@ public class RfqAdminController : BasePluginController
     #region Fields
 
     private readonly AdminModelFactory _modelFactory;
+    private readonly CaptchaSettings _captchaSettings;
     private readonly ICustomerModelFactory _customerModelFactory;
     private readonly ICustomerService _customerService;
     private readonly ILocalizationService _localizationService;
@@ -48,6 +50,7 @@ public class RfqAdminController : BasePluginController
     #region Ctor
 
     public RfqAdminController(AdminModelFactory modelFactory,
+        CaptchaSettings captchaSettings,
         ICustomerModelFactory customerModelFactory,
         ICustomerService customerService,
         ILocalizationService localizationService,
@@ -62,6 +65,7 @@ public class RfqAdminController : BasePluginController
         RfqSettings rfqSettings)
     {
         _modelFactory = modelFactory;
+        _captchaSettings = captchaSettings;
         _customerModelFactory = customerModelFactory;
         _customerService = customerService;
         _localizationService = localizationService;
@@ -82,11 +86,14 @@ public class RfqAdminController : BasePluginController
 
     #region Configure
 
-    public async Task<IActionResult> Configure()
+    [CheckPermission(StandardPermission.Configuration.MANAGE_PLUGINS)]
+    public IActionResult Configure()
     {
         var model = new ConfigurationModel
         {
-            Enabled = _rfqSettings.Enabled
+            Enabled = _rfqSettings.Enabled,
+            ShowCaptchaOnRequestPage = _rfqSettings.ShowCaptchaOnRequestPage,
+            AllowCustomerGenerateQuotePdf = _rfqSettings.AllowCustomerGenerateQuotePdf
         };
 
         return View("~/Plugins/Misc.RFQ/Views/Admin/Configure.cshtml", model);
@@ -94,18 +101,31 @@ public class RfqAdminController : BasePluginController
 
     [HttpPost, ActionName("Configure")]
     [FormValueRequired("save")]
+    [CheckPermission(StandardPermission.Configuration.MANAGE_PLUGINS)]
     public async Task<IActionResult> Configure(ConfigurationModel model)
     {
         if (!ModelState.IsValid)
-            return await Configure();
-        
+            return Configure();
+
         _rfqSettings.Enabled = model.Enabled;
+        _rfqSettings.ShowCaptchaOnRequestPage = model.ShowCaptchaOnRequestPage;
+        _rfqSettings.AllowCustomerGenerateQuotePdf = model.AllowCustomerGenerateQuotePdf;
 
         await _settingService.SaveSettingAsync(_rfqSettings);
-        
+
         _notificationService.SuccessNotification(await _localizationService.GetResourceAsync("Admin.Plugins.Saved"));
 
-        return await Configure();
+        return Configure();
+    }
+
+    public async Task<IActionResult> CheckIsCaptchaEnabled(bool showCaptchaOnRequestPage)
+    {
+        if (_captchaSettings.Enabled || !showCaptchaOnRequestPage)
+            return Json(new { Result = string.Empty });
+
+        var warning = string.Format(await _localizationService.GetResourceAsync("Plugins.Misc.RFQ.CaptchaDisabled.Notification"), Url.Action("GeneralCommon", "Setting"));
+
+        return Json(new { Result = warning });
     }
 
     #endregion
@@ -148,7 +168,7 @@ public class RfqAdminController : BasePluginController
             ?? throw new ArgumentException("No product found with the specified id");
 
         //basic properties
-        _ = decimal.TryParse(form["UnitPriceInclTax"], NumberStyles.Any, CultureInfo.InvariantCulture, out var unitPriceInclTax);
+        _ = decimal.TryParse(form["UnitPriceInclTax"], out var unitPriceInclTax);
         _ = int.TryParse(form["Quantity"], out var quantity);
 
         //warnings
@@ -338,7 +358,7 @@ public class RfqAdminController : BasePluginController
             return await AdminRequest(id);
 
         int.TryParse(form[$"quantity{requestQuoteItemId}"], out var requestedQty);
-        decimal.TryParse(form[$"unitPrice{requestQuoteItemId}"], NumberStyles.Any, CultureInfo.InvariantCulture, out var requestedUnitPrice);
+        decimal.TryParse(form[$"unitPrice{requestQuoteItemId}"], out var requestedUnitPrice);
 
         await _rfqService.UpdateRequestQuoteItemAsync(requestQuoteItemId, requestedQty, requestedUnitPrice);
 
@@ -439,6 +459,22 @@ public class RfqAdminController : BasePluginController
     #endregion
 
     #region Quote
+
+    [CheckPermission(RfqPermissionConfigManager.ADMIN_ACCESS_RFQ)]
+    public async Task<IActionResult> PdfDocument(int quoteId)
+    {
+        var quote = await _rfqService.GetQuoteByIdAsync(quoteId);
+
+        if (quote == null)
+            return RedirectToAction("AdminQuotes");
+
+        await using var stream = new MemoryStream();
+
+        await _rfqService.PrintQuoteToPdfAsync(stream, quote);
+        var bytes = stream.ToArray();
+
+        return File(bytes, MimeTypes.ApplicationPdf, string.Format(await _localizationService.GetResourceAsync("Plugins.Misc.RFQ.PdfFileName"), quote.Id) + ".pdf");
+    }
 
     [HttpPost]
     [CheckPermission(RfqPermissionConfigManager.ADMIN_ACCESS_RFQ)]
@@ -617,7 +653,7 @@ public class RfqAdminController : BasePluginController
             return await AdminQuote(id);
 
         int.TryParse(form[$"quantity{quoteItemId}"], out var offeredQty);
-        decimal.TryParse(form[$"unitPrice{quoteItemId}"], NumberStyles.Any, CultureInfo.InvariantCulture, out var offeredUnitPrice);
+        decimal.TryParse(form[$"unitPrice{quoteItemId}"], out var offeredUnitPrice);
 
         await _rfqService.UpdateQuoteItemAsync(quoteItemId, offeredQty, offeredUnitPrice);
 
