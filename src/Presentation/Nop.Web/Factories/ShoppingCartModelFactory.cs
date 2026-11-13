@@ -87,6 +87,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
     protected readonly IWorkContext _workContext;
     protected readonly MediaSettings _mediaSettings;
     protected readonly OrderSettings _orderSettings;
+    protected readonly ReturnRequestSettings _returnRequestSettings;
     protected readonly RewardPointsSettings _rewardPointsSettings;
     protected readonly ShippingSettings _shippingSettings;
     protected readonly ShoppingCartSettings _shoppingCartSettings;
@@ -142,6 +143,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
         IWorkContext workContext,
         MediaSettings mediaSettings,
         OrderSettings orderSettings,
+        ReturnRequestSettings returnRequestSettings,
         RewardPointsSettings rewardPointsSettings,
         ShippingSettings shippingSettings,
         ShoppingCartSettings shoppingCartSettings,
@@ -192,6 +194,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
         _workContext = workContext;
         _mediaSettings = mediaSettings;
         _orderSettings = orderSettings;
+        _returnRequestSettings = returnRequestSettings;
         _rewardPointsSettings = rewardPointsSettings;
         _shippingSettings = shippingSettings;
         _shoppingCartSettings = shoppingCartSettings;
@@ -396,6 +399,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
             ProductSeName = await _urlRecordService.GetSeNameAsync(product),
             Quantity = sci.Quantity,
             AttributeInfo = await _productAttributeFormatter.FormatAttributesAsync(product, sci.AttributesXml),
+            VendorId = product.VendorId,
         };
 
         //allow editing?
@@ -769,6 +773,49 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
         return model;
     }
 
+    /// <summary>
+    /// Prepare available vendors
+    /// </summary>
+    /// <param name="customer">Customer</param>
+    /// <param name="storeId">Store id</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the list of available vendors
+    /// </returns>
+    protected virtual async Task<List<SelectListItem>> PrepareAvailableVendorsListAsync(Customer customer, int storeId)
+    {
+        var result = new List<SelectListItem>();
+
+        var cart = await _shoppingCartService
+            .GetShoppingCartAsync(customer, [(int)ShoppingCartType.ShoppingCart, (int)ShoppingCartType.Stash], storeId);
+
+        var vendors = await cart
+            .SelectAwait(async item => await _vendorService.GetVendorByProductIdAsync(item.ProductId))
+            .ToListAsync();
+
+        if (vendors.Any(vendor => vendor is not null))
+        {
+            //check whether all items are from the same vendor
+            var distinctVendors = vendors
+                .Where(vendor => vendor is not null)
+                .DistinctBy(vendor => vendor.Id)
+                .OrderBy(vendor => vendor.DisplayOrder).ThenBy(vendor => vendor.Id)
+                .ToList();
+            if (distinctVendors.Count > 1 || vendors.Any(vendor => vendor is null))
+            {
+                result.AddRange(await distinctVendors.SelectAwait(async vendor => new SelectListItem
+                {
+                    Text = await _localizationService.GetLocalizedAsync(vendor, x => x.Name),
+                    Value = vendor.Id.ToString()
+                }).ToListAsync());
+            }
+        }
+
+        result.Insert(0, new(await _localizationService.GetResourceAsync("ShoppingCart.VendorList.All"), "0"));
+
+        return result;
+    }
+
     #endregion
 
     #region Methods
@@ -891,6 +938,7 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
         model.ShowProductImages = _shoppingCartSettings.ShowProductImagesOnShoppingCart;
         model.ShowSku = _catalogSettings.ShowSkuOnProductDetailsPage;
         model.ShowVendorName = _vendorSettings.ShowVendorOnOrderDetailsPage;
+        model.ShowItemDiscount = true;
         var customer = await _workContext.GetCurrentCustomerAsync();
         var store = await _storeContext.GetCurrentStoreAsync();
         var checkoutAttributesXml = await _genericAttributeService.GetAttributeAsync<string>(customer,
@@ -902,7 +950,10 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
             model.MinOrderSubtotalWarning = string.Format(await _localizationService.GetResourceAsync("Checkout.MinOrderSubtotalAmount"), await _priceFormatter.FormatPriceAsync(minOrderSubtotalAmount, true, false));
         }
 
-        model.TermsOfServiceOnShoppingCartPage = _orderSettings.TermsOfServiceOnShoppingCartPage;
+        var termsForDownloadableProducts = !_returnRequestSettings.DownloadableProductsReturnRequestsAllowed &&
+            await _productService.HasAnyDownloadableProductAsync(cart.Select(ci => ci.ProductId).ToArray());
+
+        model.TermsOfServiceOnShoppingCartPage = termsForDownloadableProducts || _orderSettings.TermsOfServiceOnShoppingCartPage;
         model.TermsOfServiceOnOrderConfirmPage = _orderSettings.TermsOfServiceOnOrderConfirmPage;
         model.TermsOfServicePopup = _commonSettings.PopupForTermsOfServiceLinks;
         model.DisplayTaxShippingInfo = _catalogSettings.DisplayTaxShippingInfoShoppingCart;
@@ -941,6 +992,14 @@ public partial class ShoppingCartModelFactory : IShoppingCartModelFactory
         {
             var cartItemModel = await PrepareShoppingCartItemModelAsync(cart, sci);
             model.Items.Add(cartItemModel);
+        }
+
+        if (_shoppingCartSettings.VendorEnabled)
+        {
+            model.SelectedVendorId = await _genericAttributeService
+                .GetAttributeAsync<int>(customer, NopCustomerDefaults.ShoppingCartVendorAttribute, store.Id);
+            model.AvailableVendors = await PrepareAvailableVendorsListAsync(customer, store.Id);
+            model.DisplayVendorList = model.AvailableVendors.Count > 1;
         }
 
         //payment methods

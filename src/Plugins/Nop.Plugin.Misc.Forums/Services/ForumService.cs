@@ -108,23 +108,23 @@ public class ForumService
         if (string.IsNullOrEmpty(text))
             return string.Empty;
 
+        string formatedText;
+
         try
         {
-            text = _htmlFormatter.FormatText(text);
-
-            text = textFormatType switch
+            formatedText = textFormatType switch
             {
-                TextFormatType.BBCode => _bbCodeHelper.FormatText(text),
-                TextFormatType.Markdown => Markdown.ToHtml(CSharpFormat.FormatTextSimple(text)),
-                _ => text
+                TextFormatType.BBCode => _bbCodeHelper.FormatText(_htmlFormatter.FormatText(text)),
+                TextFormatType.Markdown => CommonHelper.EnsureOnlyAllowedHtml(Markdown.ToHtml(CSharpFormat.FormatTextSimple(text))),
+                _ => _htmlFormatter.FormatText(text)
             };
         }
         catch (Exception exc)
         {
-            text = $"Text cannot be formatted. Error: {exc.Message}";
+            formatedText = $"Text cannot be formatted. Error: {exc.Message}";
         }
 
-        return text;
+        return formatedText;
     }
 
     /// <summary>
@@ -538,8 +538,14 @@ public class ForumService
     {
         ArgumentNullException.ThrowIfNull(forumTopic);
 
-        var customerId = forumTopic.CustomerId;
         var forumId = forumTopic.ForumId;
+        var customerIds = await _forumPostRepository.Table
+            .Where(fp => fp.TopicId == forumTopic.Id)
+            .Select(fp => fp.CustomerId)
+            .Distinct()
+            .ToListAsync();
+        if (!customerIds.Contains(forumTopic.CustomerId))
+            customerIds.Add(forumTopic.CustomerId);
 
         //delete topic
         await _forumTopicRepository.DeleteAsync(forumTopic);
@@ -555,7 +561,8 @@ public class ForumService
 
         //update stats
         await UpdateForumStatsAsync(forumId);
-        await UpdateCustomerStatsAsync(customerId);
+        foreach (var customerId in customerIds)
+            await UpdateCustomerStatsAsync(customerId);
     }
 
     /// <summary>
@@ -755,12 +762,14 @@ public class ForumService
 
         //delete topic
         if (deleteTopic)
+        {
             await DeleteTopicAsync(forumTopic);
+            await UpdateCustomerStatsAsync(customerId);
+            return;
+        }
 
         //update stats
-        if (!deleteTopic)
-            await UpdateForumTopicStatsAsync(forumTopicId);
-
+        await UpdateForumTopicStatsAsync(forumTopicId);
         await UpdateForumStatsAsync(forumId);
         await UpdateCustomerStatsAsync(customerId);
     }
@@ -1218,19 +1227,22 @@ public class ForumService
     /// </returns>
     public async Task<int> CalculateTopicPageIndexAsync(int forumTopicId, int pageSize, int postId)
     {
-        var pageIndex = 0;
-        var forumPosts = await GetAllPostsAsync(forumTopicId, ascSort: true);
+        if (pageSize <= 0)
+            return 0;
 
-        for (var i = 0; i < forumPosts.TotalCount; i++)
-        {
-            if (forumPosts[i].Id != postId)
-                continue;
+        var post = await _forumPostRepository.Table
+            .FirstOrDefaultAsync(fp => fp.Id == postId && fp.TopicId == forumTopicId);
+        if (post == null)
+            return 0;
 
-            if (pageSize > 0)
-                pageIndex = i / pageSize;
-        }
+        var createdOn = post.CreatedOnUtc;
+        var topicPosts = _forumPostRepository.Table.Where(fp => fp.TopicId == forumTopicId);
 
-        return pageIndex;
+        var postsBefore = await topicPosts.CountAsync(fp =>
+            fp.CreatedOnUtc < createdOn ||
+            fp.CreatedOnUtc == createdOn && fp.Id < postId);
+
+        return postsBefore / pageSize;
     }
 
     /// <summary>
@@ -1283,6 +1295,25 @@ public class ForumService
         post.VoteCount = postVote.IsUp ? ++post.VoteCount : --post.VoteCount;
 
         await UpdatePostAsync(post);
+    }
+
+    /// <summary>
+    /// Delete forum subscriptions and post votes of the customer
+    /// </summary>
+    /// <param name="customerId">Customer identifier</param>
+    /// <returns>A task that represents the asynchronous operation</returns>
+    public async Task DeleteCustomerDataAsync(int customerId)
+    {
+        var subscriptions = await _forumSubscriptionRepository.Table
+            .Where(fs => fs.CustomerId == customerId)
+            .ToListAsync();
+        await _forumSubscriptionRepository.DeleteAsync(subscriptions);
+
+        var postVotes = await _forumPostVoteRepository.Table
+            .Where(pv => pv.CustomerId == customerId)
+            .ToListAsync();
+        foreach (var postVote in postVotes)
+            await DeletePostVoteAsync(postVote);
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc.ViewFeatures;
+﻿using Microsoft.AspNetCore.Mvc.TagHelpers;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Nop.Services.Localization;
 using Nop.Web.Framework.Mvc.ModelBinding;
@@ -52,16 +53,26 @@ public partial class LabelTagHelper : Microsoft.AspNetCore.Mvc.TagHelpers.LabelT
         var type = For.Metadata.ContainerType;
         var propertyName = For.Metadata.Name;
 
-        if (type != null && !string.IsNullOrEmpty(propertyName))
+        var childContent = await output.GetChildContentAsync();
+        if (!childContent.IsEmptyOrWhiteSpace)
         {
-            var resourceName = type.GetProperty(propertyName)
+            resourceValue = childContent.GetContent();
+        }
+        else if (type != null && !string.IsNullOrEmpty(propertyName))
+        {
+            var attribute = type.GetProperty(propertyName)
                 ?.GetCustomAttributes(typeof(NopResourceDisplayNameAttribute), true)
                 .OfType<NopResourceDisplayNameAttribute>()
-                .FirstOrDefault()?.ResourceKey;
+                .FirstOrDefault();
 
-            if (!string.IsNullOrEmpty(resourceName))
-                //get locale resource value
-                resourceValue = await _localizationService.GetResourceAsync(resourceName);
+            if (attribute != null)
+            {
+                var resourceName = attribute.ResourceKey;
+
+                if (!string.IsNullOrEmpty(resourceName))
+                    //get locale resource value
+                    resourceValue = await _localizationService.GetResourceAsync(resourceName);
+            }
         }
 
         if (!string.IsNullOrEmpty(resourceValue))
@@ -77,8 +88,9 @@ public partial class LabelTagHelper : Microsoft.AspNetCore.Mvc.TagHelpers.LabelT
 
         if (tagBuilder != null)
         {
-            //add label
-            output.Content.SetHtmlContent(tagBuilder);
+            //merge into this tag instead of nesting a second <label> inside it
+            output.MergeAttributes(tagBuilder);
+            output.Content.SetHtmlContent(tagBuilder.InnerHtml);
         }
     }
 

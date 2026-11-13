@@ -3,7 +3,6 @@ using LinqToDB;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Localization;
 using Nop.Core.Domain.Logging;
-using Nop.Core.Domain.Media;
 using Nop.Core.Domain.Messages;
 using Nop.Core.Domain.Security;
 using Nop.Data.Extensions;
@@ -50,97 +49,6 @@ public class DataMigration : Migration
             _dataProvider.InsertEntity(
                 new ActivityLogType { SystemKeyword = "UpdatePlugin", Enabled = true, Name = "Update a plugin" }
             );
-        }
-
-        //1934
-        int pageIndex;
-        var pageSize = 500;
-        var productAttributeCombinationTableName = nameof(ProductAttributeCombination);
-
-        var pac = Schema.Table(productAttributeCombinationTableName);
-        var columnName = "PictureId";
-
-        if (pac.Column(columnName).Exists())
-        {
-#pragma warning disable CS0618
-            var combinationQuery =
-                from c in _dataProvider.GetTable<ProductAttributeCombination>()
-                join p in _dataProvider.GetTable<Picture>() on c.PictureId equals p.Id
-                select c;
-#pragma warning restore CS0618
-
-            pageIndex = 0;
-
-            while (true)
-            {
-                var combinations = combinationQuery.Skip(pageIndex * pageSize).Take(pageSize).ToList();
-
-                if (!combinations.Any())
-                    break;
-
-#pragma warning disable CS0618
-                foreach (var combination in combinations)
-                {
-                    if (!combination.PictureId.HasValue)
-                        continue;
-
-                    _dataProvider.InsertEntity(new ProductAttributeCombinationPicture
-                    {
-                        PictureId = combination.PictureId.Value,
-                        ProductAttributeCombinationId = combination.Id
-                    });
-
-                    combination.PictureId = null;
-                }
-#pragma warning restore CS0618
-
-                _dataProvider.UpdateEntitiesAsync(combinations);
-
-                pageIndex++;
-            }
-        }
-
-        var productAttributeValueTableName = nameof(ProductAttributeValue);
-        var pav = Schema.Table(productAttributeValueTableName);
-
-        if (pav.Column(columnName).Exists())
-        {
-#pragma warning disable CS0618
-            var valueQuery =
-                from c in _dataProvider.GetTable<ProductAttributeValue>()
-                join p in _dataProvider.GetTable<Picture>() on c.PictureId equals p.Id
-                select c;
-#pragma warning restore CS0618
-
-            pageIndex = 0;
-
-            while (true)
-            {
-                var values = valueQuery.Skip(pageIndex * pageSize).Take(pageSize).ToList();
-
-                if (!values.Any())
-                    break;
-
-#pragma warning disable CS0618
-                foreach (var value in values)
-                {
-                    if (!value.PictureId.HasValue)
-                        continue;
-
-                    _dataProvider.InsertEntity(new ProductAttributeValuePicture
-                    {
-                        PictureId = value.PictureId.Value,
-                        ProductAttributeValueId = value.Id
-                    });
-
-                    value.PictureId = null;
-                }
-#pragma warning restore CS0618
-
-                _dataProvider.UpdateEntitiesAsync(values);
-
-                pageIndex++;
-            }
         }
 
         // new permission

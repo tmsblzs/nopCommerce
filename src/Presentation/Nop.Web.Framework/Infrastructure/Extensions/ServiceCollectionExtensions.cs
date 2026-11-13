@@ -1,4 +1,6 @@
-﻿using System.Threading.RateLimiting;
+﻿using System.Diagnostics;
+using System.Text.Encodings.Web;
+using System.Threading.RateLimiting;
 using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
@@ -23,7 +25,6 @@ using Nop.Services.Authentication;
 using Nop.Services.Authentication.External;
 using Nop.Services.Common;
 using Nop.Web.Framework.ClientsideFluentValidation;
-using Nop.Web.Framework.Mvc.ModelBinding;
 using Nop.Web.Framework.Mvc.ModelBinding.Binders;
 using Nop.Web.Framework.Mvc.Routing;
 using Nop.Web.Framework.Security.Captcha;
@@ -116,23 +117,27 @@ public static class ServiceCollectionExtensions
         //create engine and configure service provider
         var engine = EngineContext.Create();
 
-        builder.Services.AddRateLimiter(options =>
+        var commonConfig = Singleton<AppSettings>.Instance.Get<CommonConfig>();
+
+        //add rate limiting if enabled and configured correctly
+        if (commonConfig.PermitLimit > 0)
         {
-            var settings = Singleton<AppSettings>.Instance.Get<CommonConfig>();
+            builder.Services.AddRateLimiter(options =>
+            {
+                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+                    RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: httpContext.User.Identity?.Name ?? httpContext.Request.Headers.Host.ToString(),
+                        factory: partition => new FixedWindowRateLimiterOptions
+                        {
+                            AutoReplenishment = true,
+                            PermitLimit = commonConfig.PermitLimit,
+                            QueueLimit = commonConfig.QueueCount,
+                            Window = TimeSpan.FromMinutes(1)
+                        }));
 
-            options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-                RateLimitPartition.GetFixedWindowLimiter(
-                    partitionKey: httpContext.User.Identity?.Name ?? httpContext.Request.Headers.Host.ToString(),
-                    factory: partition => new FixedWindowRateLimiterOptions
-                    {
-                        AutoReplenishment = true,
-                        PermitLimit = settings.PermitLimit,
-                        QueueLimit = settings.QueueCount,
-                        Window = TimeSpan.FromMinutes(1)
-                    }));
-
-            options.RejectionStatusCode = settings.RejectionStatusCode;
-        });
+                options.RejectionStatusCode = commonConfig.RejectionStatusCode;
+            });
+        }
 
         engine.ConfigureServices(services, builder.Configuration);
     }
@@ -188,6 +193,16 @@ public static class ServiceCollectionExtensions
         {
             options.ViewLocationExpanders.Add(new ThemeableViewLocationExpander());
         });
+
+        //keep the normal Razor engine for caching and compilation, and decorate explicit plugin paths.
+        services.TryAddSingleton<RazorViewEngine>();
+
+        services.Replace(ServiceDescriptor.Singleton<IRazorViewEngine>(provider =>
+            new ThemeableRazorViewEngine(provider.GetRequiredService<DiagnosticListener>(),
+                provider.GetRequiredService<HtmlEncoder>(),
+                provider.GetRequiredService<IHttpContextAccessor>(),
+                provider.GetRequiredService<IRazorPageActivator>(),
+                provider.GetRequiredService<RazorViewEngine>())));
     }
 
     /// <summary>

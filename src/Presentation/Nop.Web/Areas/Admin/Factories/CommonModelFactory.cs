@@ -16,6 +16,7 @@ using Nop.Core.Events;
 using Nop.Core.Http;
 using Nop.Core.Infrastructure;
 using Nop.Data;
+using Nop.Services.ArtificialIntelligence;
 using Nop.Services.Authentication.External;
 using Nop.Services.Authentication.MultiFactor;
 using Nop.Services.Blogs;
@@ -28,6 +29,7 @@ using Nop.Services.Events;
 using Nop.Services.Helpers;
 using Nop.Services.Localization;
 using Nop.Services.Media;
+using Nop.Services.Messages;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Plugins;
@@ -61,6 +63,7 @@ public partial class CommonModelFactory : ICommonModelFactory
     protected readonly AppSettings _appSettings;
     protected readonly CatalogSettings _catalogSettings;
     protected readonly CurrencySettings _currencySettings;
+    protected readonly IAiRecommendationPluginManager _aiRecommendationPluginManager;
     protected readonly IAuthenticationPluginManager _authenticationPluginManager;
     protected readonly IBaseAdminModelFactory _baseAdminModelFactory;
     protected readonly IBlogService _blogService;
@@ -91,6 +94,7 @@ public partial class CommonModelFactory : ICommonModelFactory
     protected readonly ISearchTermService _searchTermService;
     protected readonly IServiceCollection _serviceCollection;
     protected readonly IShippingPluginManager _shippingPluginManager;
+    protected readonly ISmsPluginManager _smsPluginManager;
     protected readonly IStaticCacheManager _staticCacheManager;
     protected readonly IStoreContext _storeContext;
     protected readonly IStoreService _storeService;
@@ -113,6 +117,7 @@ public partial class CommonModelFactory : ICommonModelFactory
     public CommonModelFactory(AppSettings appSettings,
         CatalogSettings catalogSettings,
         CurrencySettings currencySettings,
+        IAiRecommendationPluginManager aiRecommendationPluginManager,
         IAuthenticationPluginManager authenticationPluginManager,
         IBaseAdminModelFactory baseAdminModelFactory,
         IBlogService blogService,
@@ -143,6 +148,7 @@ public partial class CommonModelFactory : ICommonModelFactory
         ISearchTermService searchTermService,
         IServiceCollection serviceCollection,
         IShippingPluginManager shippingPluginManager,
+        ISmsPluginManager smsPluginManager,
         IStaticCacheManager staticCacheManager,
         IStoreContext storeContext,
         IStoreService storeService,
@@ -161,6 +167,7 @@ public partial class CommonModelFactory : ICommonModelFactory
         _appSettings = appSettings;
         _catalogSettings = catalogSettings;
         _currencySettings = currencySettings;
+        _aiRecommendationPluginManager = aiRecommendationPluginManager;
         _authenticationPluginManager = authenticationPluginManager;
         _baseAdminModelFactory = baseAdminModelFactory;
         _blogService = blogService;
@@ -191,6 +198,7 @@ public partial class CommonModelFactory : ICommonModelFactory
         _searchTermService = searchTermService;
         _serviceCollection = serviceCollection;
         _shippingPluginManager = shippingPluginManager;
+        _smsPluginManager = smsPluginManager;
         _staticCacheManager = staticCacheManager;
         _storeContext = storeContext;
         _storeService = storeService;
@@ -739,6 +747,14 @@ public partial class CommonModelFactory : ICommonModelFactory
                 case IExchangeRateProvider exchangeRateProvider:
                     isEnabled = _exchangeRatePluginManager.IsPluginActive(exchangeRateProvider);
                     break;
+
+                case ISmsProvider smsProvider:
+                    isEnabled = _smsPluginManager.IsPluginActive(smsProvider);
+                    break;
+
+                case IAiRecommendationPlugin aiRecommendationPlugin:
+                    isEnabled = _aiRecommendationPluginManager.IsPluginActive(aiRecommendationPlugin);
+                    break;
             }
 
             if (isEnabled)
@@ -794,7 +810,7 @@ public partial class CommonModelFactory : ICommonModelFactory
                 return null;
             });
 
-        return string.IsNullOrEmpty(latestReleaseInfo.Name) ? null : latestReleaseInfo.Name.Replace("release-", string.Empty);
+        return string.IsNullOrEmpty(latestReleaseInfo?.Name) ? null : latestReleaseInfo.Name.Replace("release-", string.Empty);
     }
 
     #endregion

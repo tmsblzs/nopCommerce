@@ -90,6 +90,7 @@ public class ScheduleTaskServiceTests : ServiceTest
             _scheduleTaskService.UpdateTaskAsync(null).Wait());
     }
 
+    [Test]
     public async Task CanDeleteTask()
     {
         _task.Id = 0;
@@ -135,13 +136,13 @@ public class ScheduleTaskServiceTests : ServiceTest
     {
         var tasks = await _scheduleTaskService.GetAllTasksAsync();
 
-        tasks.Count.Should().Be(5);
+        tasks.Count.Should().Be(9);
         tasks.Any(p => p.Enabled == false).Should().BeFalse();
         tasks.Any(p => p.Id == _task.Id).Should().BeFalse();
 
         tasks = await _scheduleTaskService.GetAllTasksAsync(true);
 
-        tasks.Count.Should().Be(9);
+        tasks.Count.Should().Be(13);
         tasks.Any(p => p.Enabled).Should().BeTrue();
         tasks.Any(p => p.Id == _task.Id).Should().BeTrue();
     }

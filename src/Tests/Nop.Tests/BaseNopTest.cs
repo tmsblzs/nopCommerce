@@ -64,6 +64,7 @@ using Nop.Services.Messages;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Plugins;
+using Nop.Services.PriceLists;
 using Nop.Services.ScheduleTasks;
 using Nop.Services.Security;
 using Nop.Services.Seo;
@@ -76,6 +77,7 @@ using Nop.Services.Themes;
 using Nop.Services.Topics;
 using Nop.Services.Vendors;
 using Nop.Tests.Nop.Services.Tests.ScheduleTasks;
+using Nop.Tests.Nop.Services.Tests.Tax;
 using Nop.Tests.Nop.Web.Tests.Public.Factories;
 using Nop.Web.Areas.Admin.Factories;
 using Nop.Web.Framework;
@@ -336,6 +338,7 @@ public partial class BaseNopTest
         services.AddTransient<IPermissionService, PermissionService>();
         services.AddTransient<IAclService, AclService>();
         services.AddTransient<IPriceCalculationService, PriceCalculationService>();
+        services.AddTransient<IPriceListService, PriceListService>();
         services.AddTransient<IGeoLookupService, GeoLookupService>();
         services.AddTransient<ICountryService, CountryService>();
         services.AddTransient<ICurrencyService, CurrencyService>();
@@ -385,7 +388,7 @@ public partial class BaseNopTest
         services.AddTransient<IShippingMethodsService, ShippingMethodsService>();
         services.AddTransient<IDateRangeService, DateRangeService>();
         services.AddTransient<ITaxCategoryService, TaxCategoryService>();
-        services.AddTransient<ICheckVatService, CheckVatService>();
+        services.AddTransient<ICheckVatService, TestCheckVatService>();
         services.AddTransient<ITaxService, TaxService>();
         services.AddTransient<ILogger, DefaultLogger>();
         services.AddTransient<ICustomerActivityService, CustomerActivityService>();
@@ -420,7 +423,9 @@ public partial class BaseNopTest
         services.AddTransient<IPickupPluginManager, PickupPluginManager>();
         services.AddTransient<IShippingPluginManager, ShippingPluginManager>();
         services.AddTransient<ITaxPluginManager, TaxPluginManager>();
+        services.AddTransient<ISmsPluginManager, SmsPluginManager>();
         services.AddScoped<ISearchPluginManager, SearchPluginManager>();
+        services.AddTransient<IAiRecommendationPluginManager, AiRecommendationPluginManager>();
 
         //picture thumb service
         services.AddScoped<IThumbService, ThumbService>();

@@ -22,7 +22,6 @@ using Nop.Core.Events;
 using Nop.Core.Http;
 using Nop.Core.Infrastructure;
 using Nop.Data;
-using Nop.Services.Authentication;
 using Nop.Services.Common;
 using Nop.Services.Helpers;
 using Nop.Services.Installation;
@@ -269,6 +268,7 @@ public static class ApplicationBuilderExtensions
     {
         var fileProvider = EngineContext.Current.Resolve<INopFileProvider>();
         var appSettings = EngineContext.Current.Resolve<AppSettings>();
+        var mediaSettings = EngineContext.Current.Resolve<MediaSettings>();
 
         void staticFileResponse(StaticFileResponseContext context)
         {
@@ -299,7 +299,7 @@ public static class ApplicationBuilderExtensions
         //images
         application.UseStaticFiles(new StaticFileOptions
         {
-            FileProvider = new PhysicalFileProvider(fileProvider.GetLocalImagesPath(EngineContext.Current.Resolve<MediaSettings>())),
+            FileProvider = new PhysicalFileProvider(fileProvider.GetLocalImagesPath(mediaSettings)),
             RequestPath = new PathString("/images"),
             OnPrepareResponse = staticFileResponse
         });
@@ -353,6 +353,15 @@ public static class ApplicationBuilderExtensions
             ContentTypeProvider = provider
         });
 
+        //add support for 3D objects (GLB files)
+        provider.Mappings[".glb"] = MimeTypes.ModelGlb;
+        application.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(fileProvider.Combine(fileProvider.GetLocalImagesPath(mediaSettings), NopMediaDefaults.Default3dObjectsDirectoryName)),
+            RequestPath = new PathString($"/images/3d"),
+            ContentTypeProvider = provider
+        });
+
         if (appSettings.Get<CommonConfig>().ServeUnknownFileTypes)
         {
             application.UseStaticFiles(new StaticFileOptions
@@ -401,7 +410,7 @@ public static class ApplicationBuilderExtensions
         if (!DataSettingsManager.IsDatabaseInstalled())
             return;
 
-        application.UseMiddleware<AuthenticationMiddleware>();
+        application.UseAuthentication();
     }
 
     /// <summary>

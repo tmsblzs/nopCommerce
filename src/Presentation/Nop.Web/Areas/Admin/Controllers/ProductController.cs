@@ -12,10 +12,12 @@ using Nop.Core.Domain.FilterLevels;
 using Nop.Core.Domain.Localization;
 using Nop.Core.Domain.Media;
 using Nop.Core.Domain.Orders;
+using Nop.Core.Domain.PriceLists;
 using Nop.Core.Domain.Tax;
 using Nop.Core.Domain.Vendors;
 using Nop.Core.Events;
 using Nop.Core.Http;
+using Nop.Core.Http.Extensions;
 using Nop.Core.Infrastructure;
 using Nop.Services.ArtificialIntelligence;
 using Nop.Services.Catalog;
@@ -31,6 +33,7 @@ using Nop.Services.Logging;
 using Nop.Services.Media;
 using Nop.Services.Messages;
 using Nop.Services.Orders;
+using Nop.Services.PriceLists;
 using Nop.Services.Security;
 using Nop.Services.Seo;
 using Nop.Services.Shipping;
@@ -79,6 +82,7 @@ public partial class ProductController : BaseAdminController
     protected readonly IPdfService _pdfService;
     protected readonly IPermissionService _permissionService;
     protected readonly IPictureService _pictureService;
+    protected readonly IPriceListService _priceListService;
     protected readonly IProductAttributeFormatter _productAttributeFormatter;
     protected readonly IProductAttributeParser _productAttributeParser;
     protected readonly IProductAttributeService _productAttributeService;
@@ -98,6 +102,7 @@ public partial class ProductController : BaseAdminController
     protected readonly IWorkContext _workContext;
     protected readonly CurrencySettings _currencySettings;
     protected readonly LocalizationSettings _localizationSettings;
+    protected readonly MediaSettings _mediaSettings;
     protected readonly TaxSettings _taxSettings;
     protected readonly VendorSettings _vendorSettings;
     private static readonly char[] _separator = [','];
@@ -133,6 +138,7 @@ public partial class ProductController : BaseAdminController
         IPdfService pdfService,
         IPermissionService permissionService,
         IPictureService pictureService,
+        IPriceListService priceListService,
         IProductAttributeFormatter productAttributeFormatter,
         IProductAttributeParser productAttributeParser,
         IProductAttributeService productAttributeService,
@@ -152,6 +158,7 @@ public partial class ProductController : BaseAdminController
         IWorkContext workContext,
         CurrencySettings currencySettings,
         LocalizationSettings localizationSettings,
+        MediaSettings mediaSettings,
         TaxSettings taxSettings,
         VendorSettings vendorSettings)
     {
@@ -182,6 +189,7 @@ public partial class ProductController : BaseAdminController
         _pdfService = pdfService;
         _permissionService = permissionService;
         _pictureService = pictureService;
+        _priceListService = priceListService;
         _productAttributeFormatter = productAttributeFormatter;
         _productAttributeParser = productAttributeParser;
         _productAttributeService = productAttributeService;
@@ -201,6 +209,7 @@ public partial class ProductController : BaseAdminController
         _workContext = workContext;
         _currencySettings = currencySettings;
         _localizationSettings = localizationSettings;
+        _mediaSettings = mediaSettings;
         _taxSettings = taxSettings;
         _vendorSettings = vendorSettings;
     }
@@ -311,30 +320,32 @@ public partial class ProductController : BaseAdminController
         await _categoryService.DeleteProductCategoriesAsync(productCategoriesToDelete);
 
         //add categories
-        foreach (var categoryId in model.SelectedCategoryIds)
-        {
-            var category = await _categoryService.GetCategoryByIdAsync(categoryId);
-            if (category is null)
-                continue;
+        var categories = await _categoryService.GetCategoriesByIdsAsync(model.SelectedCategoryIds.ToArray());
+        var productCategoriesToAdd = new List<ProductCategory>();
 
+        foreach (var category in categories)
+        {
             if (!await _categoryService.CanVendorAddProductsAsync(category))
                 continue;
 
-            if (_categoryService.FindProductCategory(existingProductCategories, product.Id, categoryId) == null)
+            if (_categoryService.FindProductCategory(existingProductCategories, product.Id, category.Id) == null)
             {
                 //find next display order
                 var displayOrder = 1;
-                var existingCategoryMapping = await _categoryService.GetProductCategoriesByCategoryIdAsync(categoryId, showHidden: true);
+                var existingCategoryMapping = await _categoryService.GetProductCategoriesByCategoryIdAsync(category.Id, showHidden: true);
                 if (existingCategoryMapping.Any())
                     displayOrder = existingCategoryMapping.Max(x => x.DisplayOrder) + 1;
-                await _categoryService.InsertProductCategoryAsync(new ProductCategory
+
+                productCategoriesToAdd.Add(new ProductCategory
                 {
                     ProductId = product.Id,
-                    CategoryId = categoryId,
+                    CategoryId = category.Id,
                     DisplayOrder = displayOrder
                 });
             }
         }
+
+        await _categoryService.InsertProductCategoriesAsync(productCategoriesToAdd);
     }
 
     protected virtual async Task SaveManufacturerMappingsAsync(Product product, ProductModel model)
@@ -346,23 +357,28 @@ public partial class ProductController : BaseAdminController
         await _manufacturerService.DeleteProductManufacturersAsync(productManufacturersToDelete);
 
         //add manufacturers
-        foreach (var manufacturerId in model.SelectedManufacturerIds)
+        var manufacturers = await _manufacturerService.GetManufacturersByIdsAsync(model.SelectedManufacturerIds.ToArray());
+        var productManufacturersToAdd = new List<ProductManufacturer>();
+
+        foreach (var manufacturer in manufacturers)
         {
-            if (_manufacturerService.FindProductManufacturer(existingProductManufacturers, product.Id, manufacturerId) == null)
+            if (_manufacturerService.FindProductManufacturer(existingProductManufacturers, product.Id, manufacturer.Id) == null)
             {
                 //find next display order
                 var displayOrder = 1;
-                var existingManufacturerMapping = await _manufacturerService.GetProductManufacturersByManufacturerIdAsync(manufacturerId, showHidden: true);
+                var existingManufacturerMapping = await _manufacturerService.GetProductManufacturersByManufacturerIdAsync(manufacturer.Id, showHidden: true);
                 if (existingManufacturerMapping.Any())
                     displayOrder = existingManufacturerMapping.Max(x => x.DisplayOrder) + 1;
-                await _manufacturerService.InsertProductManufacturerAsync(new ProductManufacturer
+
+                productManufacturersToAdd.Add(new ProductManufacturer
                 {
                     ProductId = product.Id,
-                    ManufacturerId = manufacturerId,
+                    ManufacturerId = manufacturer.Id,
                     DisplayOrder = displayOrder
                 });
             }
         }
+        await _manufacturerService.InsertProductManufacturersAsync(productManufacturersToAdd);
     }
 
     protected virtual async Task SaveDiscountMappingsAsync(Product product, ProductModel model)
@@ -924,6 +940,21 @@ public partial class ProductController : BaseAdminController
         }
     }
 
+    /// <summary>
+    /// Sanitize product description (remove disallowed HTML tags)
+    /// </summary>
+    /// <param name="model">Product model</param>
+    protected virtual void SanitizeProductDescription(ProductModel model)
+    {
+        model.FullDescription = CommonHelper.EnsureOnlyAllowedHtml(model.FullDescription);
+
+        foreach (var productLocalizedModel in model.Locales)
+        {
+            productLocalizedModel.FullDescription =
+                CommonHelper.EnsureOnlyAllowedHtml(productLocalizedModel.FullDescription);
+        }
+    }
+
     #endregion
 
     #region Methods
@@ -960,10 +991,15 @@ public partial class ProductController : BaseAdminController
     {
         var data = await ParseBulkEditDataAsync();
 
-        var productsToUpdate = data.Where(d => d.NeedToUpdate(selected)).ToList();
+        var productsToUpdate = data.Where(d => d.NeedToUpdate(selected));
+        var currentVendor = await _workContext.GetCurrentVendorAsync();
+
+        if (currentVendor != null)
+            productsToUpdate = productsToUpdate.Where(p => p.Product.VendorId == currentVendor.Id);
+
         await _productService.UpdateProductsAsync(productsToUpdate.Select(d => d.UpdateProduct(selected)).ToList());
 
-        var productsToInsert = data.Where(d => d.NeedToCreate(selected)).ToList();
+        var productsToInsert = data.Where(d => d.NeedToCreate(selected));
         await _productService.InsertProductsAsync(productsToInsert.Select(d => d.CreateProduct(selected)).ToList());
 
         //prepare model
@@ -1064,11 +1100,23 @@ public partial class ProductController : BaseAdminController
             return RedirectToAction("List");
         }
 
+        //validate product price lists
+        var allProductPriceLists = await _priceListService.GetAllPriceListsAsync();
+        var newProductPriceLists = new List<PriceList>();
+        foreach (var productPriceList in allProductPriceLists)
+        {
+            if (model.SelectedPriceListIds.Contains(productPriceList.Id))
+                newProductPriceLists.Add(productPriceList);
+        }
+
         if (ModelState.IsValid)
         {
             //a vendor should have access only to his products
             if (currentVendor != null)
                 model.VendorId = currentVendor.Id;
+
+            if (!_adminAreaSettings.RichEditorAllowJavaScript || currentVendor != null)
+                SanitizeProductDescription(model);
 
             //vendors cannot edit "Show on home page" property
             if (currentVendor != null && model.ShowOnHomepage)
@@ -1083,6 +1131,13 @@ public partial class ProductController : BaseAdminController
             //search engine name
             model.SeName = await _urlRecordService.ValidateSeNameAsync(product, model.SeName, product.Name, true);
             await _urlRecordService.SaveSlugAsync(product, model.SeName, 0);
+
+            //product price lists
+            foreach (var productPriceList in newProductPriceLists)
+            {
+                await _priceListService.InsertPriceListItemAsync(
+                    new PriceListItem { ProductId = product.Id, PriceListId = productPriceList.Id });
+            }
 
             //locales
             await UpdateLocalesAsync(product, model);
@@ -1203,6 +1258,9 @@ public partial class ProductController : BaseAdminController
             if (currentVendor != null)
                 model.VendorId = currentVendor.Id;
 
+            if (!_adminAreaSettings.RichEditorAllowJavaScript || currentVendor != null)
+                SanitizeProductDescription(model);
+
             //we do not validate maximum number of products per vendor when editing existing products (only during creation of new products)
             //vendors cannot edit "Show on home page" property
             if (currentVendor != null && model.ShowOnHomepage != product.ShowOnHomepage)
@@ -1227,10 +1285,10 @@ public partial class ProductController : BaseAdminController
             if (product.RequireOtherProducts && !string.IsNullOrEmpty(product.RequiredProductIds))
             {
                 var requiredProductIds = _productService.ParseRequiredProductIds(product);
-                
+
                 foreach (var requiredProduct in await _productService.GetProductsByIdsAsync(requiredProductIds.ToArray()))
                 {
-                    if (product.Id == requiredProduct.Id || await isCyclicallyRequired(requiredProduct)) 
+                    if (product.Id == requiredProduct.Id || await isCyclicallyRequired(requiredProduct))
                         requireOtherProductsError = await _localizationService.GetResourceAsync("Admin.Catalog.Products.RelatedProducts.CyclicallyRelated");
 
                     break;
@@ -1254,6 +1312,28 @@ public partial class ProductController : BaseAdminController
                 {
                     associatedProduct.ParentGroupedProductId = 0;
                     await _productService.UpdateProductAsync(associatedProduct);
+                }
+            }
+
+            //product price lists
+            var allPriceLists = await _priceListService.GetAllPriceListsAsync();
+            var allProductPriceLists = await _priceListService.GetPriceListsByProductAsync(product);
+            var currentProductPriceListIds = allProductPriceLists.Select(priceList => priceList.Id).ToList();
+
+            //product price lists
+            foreach (var productPriceList in allPriceLists)
+            {
+                if (model.SelectedPriceListIds.Contains(productPriceList.Id))
+                {
+                    //new price list
+                    if (currentProductPriceListIds.All(priceListId => priceListId != productPriceList.Id))
+                        await _priceListService.InsertPriceListItemAsync(new PriceListItem { PriceListId = productPriceList.Id, ProductId = product.Id });
+                }
+                else
+                {
+                    //remove price list
+                    if (currentProductPriceListIds.Any(priceListId => priceListId == productPriceList.Id))
+                        await _priceListService.RemovePriceListItemMappingAsync(product, productPriceList);
                 }
             }
 
@@ -1709,11 +1789,20 @@ public partial class ProductController : BaseAdminController
     [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> RelatedProductAddPopup(AddRelatedProductModel model)
     {
+        //try to get a product with the specified id
+        var parentProduct = await _productService.GetProductByIdAsync(model.ProductId)
+            ?? throw new ArgumentException("No product found with the specified id");
+
+        //a vendor should have access only to his products
+        var currentVendor = await _workContext.GetCurrentVendorAsync();
+        if (currentVendor != null && parentProduct.VendorId != currentVendor.Id)
+            return Content("This is not your product");
+
         var selectedProducts = await _productService.GetProductsByIdsAsync(model.SelectedProductIds.ToArray());
         if (selectedProducts.Any())
         {
             var existingRelatedProducts = await _productService.GetRelatedProductsByProductId1Async(model.ProductId, showHidden: true);
-            var currentVendor = await _workContext.GetCurrentVendorAsync();
+
             foreach (var product in selectedProducts)
             {
                 //a vendor should have access only to his products
@@ -1806,11 +1895,19 @@ public partial class ProductController : BaseAdminController
     [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> CrossSellProductAddPopup(AddCrossSellProductModel model)
     {
+        //try to get a product with the specified id
+        var parentProduct = await _productService.GetProductByIdAsync(model.ProductId)
+            ?? throw new ArgumentException("No product found with the specified id");
+
+        //a vendor should have access only to his products
+        var currentVendor = await _workContext.GetCurrentVendorAsync();
+        if (currentVendor != null && parentProduct.VendorId != currentVendor.Id)
+            return Content("This is not your product");
+
         var selectedProducts = await _productService.GetProductsByIdsAsync(model.SelectedProductIds.ToArray());
         if (selectedProducts.Any())
         {
             var existingCrossSellProducts = await _productService.GetCrossSellProductsByProductId1Async(model.ProductId, showHidden: true);
-            var currentVendor = await _workContext.GetCurrentVendorAsync();
             foreach (var product in selectedProducts)
             {
                 //a vendor should have access only to his products
@@ -2012,11 +2109,16 @@ public partial class ProductController : BaseAdminController
     [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
     public virtual async Task<IActionResult> AssociatedProductAddPopup(AddAssociatedProductModel model)
     {
-        var selectedProducts = await _productService.GetProductsByIdsAsync(model.SelectedProductIds.ToArray());
+        //try to get a product with the specified id
+        var parentProduct = await _productService.GetProductByIdAsync(model.ProductId)
+            ?? throw new ArgumentException("No product found with the specified id");
 
-        var tryToAddSelfGroupedProduct = selectedProducts
-            .Select(p => p.Id)
-            .Contains(model.ProductId);
+        //a vendor should have access only to his products
+        var currentVendor = await _workContext.GetCurrentVendorAsync();
+        if (currentVendor != null && parentProduct.VendorId != currentVendor.Id)
+            return Content("This is not your product");
+
+        var selectedProducts = await _productService.GetProductsByIdsAsync(model.SelectedProductIds.ToArray());
 
         if (selectedProducts.Any())
         {
@@ -2026,30 +2128,32 @@ public partial class ProductController : BaseAdminController
                     continue;
 
                 //a vendor should have access only to his products
-                var currentVendor = await _workContext.GetCurrentVendorAsync();
                 if (currentVendor != null && product.VendorId != currentVendor.Id)
                     continue;
 
                 product.ParentGroupedProductId = model.ProductId;
                 await _productService.UpdateProductAsync(product);
             }
-        }
 
-        if (tryToAddSelfGroupedProduct)
-        {
-            _notificationService.WarningNotification(await _localizationService.GetResourceAsync("Admin.Catalog.Products.AssociatedProducts.TryToAddSelfGroupedProduct"));
+            var tryToAddSelfGroupedProduct = selectedProducts
+                .Select(p => p.Id)
+                .Contains(model.ProductId);
 
-            var addAssociatedProductSearchModel = await _productModelFactory.PrepareAddAssociatedProductSearchModelAsync(new AddAssociatedProductSearchModel());
-            //set current product id
-            addAssociatedProductSearchModel.ProductId = model.ProductId;
+            if (tryToAddSelfGroupedProduct)
+            {
+                _notificationService.WarningNotification(await _localizationService.GetResourceAsync("Admin.Catalog.Products.AssociatedProducts.TryToAddSelfGroupedProduct"));
 
-            ViewBag.RefreshPage = true;
+                var addAssociatedProductSearchModel = await _productModelFactory.PrepareAddAssociatedProductSearchModelAsync(new AddAssociatedProductSearchModel());
+                //set current product id
+                addAssociatedProductSearchModel.ProductId = model.ProductId;
 
-            return View(addAssociatedProductSearchModel);
+                ViewBag.RefreshPage = true;
+
+                return View(addAssociatedProductSearchModel);
+            }
         }
 
         ViewBag.RefreshPage = true;
-
         ViewBag.ClosePage = true;
 
         return View(new AddAssociatedProductSearchModel());
@@ -2390,6 +2494,12 @@ public partial class ProductController : BaseAdminController
         if (currentVendor != null && product.VendorId != currentVendor.Id)
             return RedirectToAction("List");
 
+        if (currentVendor != null)
+        {
+            model.Value = CommonHelper.EnsureOnlyAllowedHtml(model.Value);
+            model.ValueRaw = CommonHelper.EnsureOnlyAllowedHtml(model.ValueRaw);
+        }
+
         //we allow filtering only for "Option" attribute type
         if (model.AttributeTypeId != (int)SpecificationAttributeType.Option)
             model.AllowFiltering = false;
@@ -2413,7 +2523,7 @@ public partial class ProductController : BaseAdminController
                 {
                     await _localizedEntityService.SaveLocalizedValueAsync(psa,
                         x => x.CustomValue,
-                        localized.Value,
+                        currentVendor != null ? CommonHelper.EnsureOnlyAllowedHtml(localized.Value) : localized.Value,
                         localized.LanguageId);
                 }
 
@@ -2423,7 +2533,7 @@ public partial class ProductController : BaseAdminController
                 {
                     await _localizedEntityService.SaveLocalizedValueAsync(psa,
                         x => x.CustomValue,
-                        localized.ValueRaw,
+                        currentVendor != null ? CommonHelper.EnsureOnlyAllowedHtml(localized.ValueRaw) : localized.ValueRaw,
                         localized.LanguageId);
                 }
 
@@ -2491,6 +2601,12 @@ public partial class ProductController : BaseAdminController
             return RedirectToAction("List");
         }
 
+        if (currentVendor != null)
+        {
+            model.Value = CommonHelper.EnsureOnlyAllowedHtml(model.Value);
+            model.ValueRaw = CommonHelper.EnsureOnlyAllowedHtml(model.ValueRaw);
+        }
+
         //we allow filtering and change option only for "Option" attribute type
         //save localized values for CustomHtmlText and CustomText
         switch (model.AttributeTypeId)
@@ -2506,7 +2622,7 @@ public partial class ProductController : BaseAdminController
                 {
                     await _localizedEntityService.SaveLocalizedValueAsync(psa,
                         x => x.CustomValue,
-                        localized.ValueRaw,
+                        currentVendor != null ? CommonHelper.EnsureOnlyAllowedHtml(localized.ValueRaw) : localized.ValueRaw,
                         localized.LanguageId);
                 }
 
@@ -2517,7 +2633,7 @@ public partial class ProductController : BaseAdminController
                 {
                     await _localizedEntityService.SaveLocalizedValueAsync(psa,
                         x => x.CustomValue,
-                        localized.Value,
+                        currentVendor != null ? CommonHelper.EnsureOnlyAllowedHtml(localized.Value) : localized.Value,
                         localized.LanguageId);
                 }
 
@@ -3859,7 +3975,13 @@ public partial class ProductController : BaseAdminController
     {
         //try to get a product with the specified id
         var product = await _productService.GetProductByIdAsync(model.ProductId);
+
         if (product == null)
+            return RedirectToAction("List", "Product");
+
+        //a vendor should have access only to his products
+        var currentVendor = await _workContext.GetCurrentVendorAsync();
+        if (currentVendor != null && product.VendorId != currentVendor.Id)
             return RedirectToAction("List", "Product");
 
         var allowedAttributeIds = form.Keys.Where(key => key.Contains("attribute_value_"))
@@ -4058,6 +4180,135 @@ public partial class ProductController : BaseAdminController
         var model = await _productModelFactory.PrepareStockQuantityHistoryListModelAsync(searchModel, product);
 
         return Json(model);
+    }
+
+    #endregion
+
+    #region Product 3D object
+
+    [HttpPost]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
+    public virtual async Task<IActionResult> Product3dObjectSave(int productId, [Validate] Product3dObjectModel model)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(productId);
+
+        if (!ModelState.IsValid)
+            return ErrorJson(ModelState.SerializeErrors());
+
+        var product = await _productService.GetProductByIdAsync(productId);
+
+        if (product is null)
+            return ErrorJson("No product found with the specified id");
+
+        //a vendor should have access only to his products
+        var currentVendor = await _workContext.GetCurrentVendorAsync();
+        if (currentVendor != null && product.VendorId != currentVendor.Id)
+            return ErrorJson("This is not your product");
+
+        var existed3dObject = await _productService.GetProduct3dObjectAsync(product);
+        if (existed3dObject is null)
+            return ErrorJson("No associated 3D objects found with the specified id");
+
+        try
+        {
+            if (model.Id == 0)
+            {
+                var picture = await _pictureService.GetPictureByIdAsync(existed3dObject.PreviewPictureId ?? 0);
+                if (picture != null)
+                    await _pictureService.DeletePictureAsync(picture);
+
+                await _productService.DeleteProduct3dObjectAsync(existed3dObject);
+
+                var pathTo3dObjects = _fileProvider.Combine(_fileProvider.GetLocalImagesPath(_mediaSettings), NopMediaDefaults.Default3dObjectsDirectoryName);
+
+                if (!string.IsNullOrEmpty(existed3dObject.FileName))
+                    _fileProvider.DeleteFile(_fileProvider.Combine(pathTo3dObjects, existed3dObject.FileName));
+
+                return Json(new { success = true, deleted = true });
+            }
+
+            var objectToUpdate = model.ToEntity<Product3dObject>();
+            objectToUpdate.FileName = existed3dObject.FileName;
+            objectToUpdate.ProductId = productId;
+
+            //delete an old picture (if deleted or updated)
+            if (model.PreviewPictureId != existed3dObject.PreviewPictureId)
+            {
+                if (model.PreviewPictureId == 0)
+                    objectToUpdate.PreviewPictureId = null;
+
+                var prevPicture = await _pictureService.GetPictureByIdAsync(existed3dObject.PreviewPictureId ?? 0);
+                if (prevPicture != null)
+                    await _pictureService.DeletePictureAsync(prevPicture);
+            }
+
+            await _productService.UpdateProduct3dObjectAsync(objectToUpdate);
+        }
+        catch (Exception ex)
+        {
+            return Json(new
+            {
+                success = false,
+                error = ex.Message,
+            });
+        }
+
+        return Json(new { success = true });
+    }
+
+    [HttpPost]
+    //do not validate request token (XSRF)
+    [IgnoreAntiforgeryToken]
+    [CheckPermission(StandardPermission.Catalog.PRODUCTS_CREATE_EDIT_DELETE)]
+    public virtual async Task<IActionResult> Upload3dObject(int productId)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(productId);
+
+        var product = await _productService.GetProductByIdAsync(productId)
+            ?? throw new ArgumentException("No product found with the specified id");
+
+        var currentVendor = await _workContext.GetCurrentVendorAsync();
+        if (currentVendor != null && (!_vendorSettings.AllowVendorsToUpload3dObjects || product.VendorId != currentVendor.Id))
+            return Json(new { success = false, message = "You cannot upload files" });
+
+        var httpPostedFile = await Request.GetFirstOrDefaultFileAsync();
+        if (httpPostedFile == null)
+            return Json(new { success = false, message = "No file uploaded" });
+
+        //remove path (passed in IE)
+        var fileName = _fileProvider.GetFileName(httpPostedFile.FileName);
+
+        var fileExtension = _fileProvider.GetFileExtension(fileName);
+        if (!string.IsNullOrEmpty(fileExtension))
+            fileExtension = fileExtension.ToLowerInvariant();
+
+        if (string.IsNullOrEmpty(fileExtension) || !fileExtension.Equals(".glb"))
+            return Json(new { success = false, message = "Wrong file type" });
+
+        if ((httpPostedFile.Length / 1024 / 1024) > _mediaSettings.Object3dUploadSizeLimit)
+            return Json(new { success = false, message = $"File is too large. Maximum allowed size is {_mediaSettings.Object3dUploadSizeLimit} MB" });
+
+        var pathTo3dObjects = _fileProvider.Combine(_fileProvider.GetLocalImagesPath(_mediaSettings), NopMediaDefaults.Default3dObjectsDirectoryName);
+        _fileProvider.CreateDirectory(pathTo3dObjects);
+
+        var uploadedName = $"{_fileProvider.GetFileNameWithoutExtension(fileName)}_{product.Id:00000}{_fileProvider.GetFileExtension(fileName)}";
+        var fileBinary = await _downloadService.GetDownloadBitsAsync(httpPostedFile);
+        await _fileProvider.WriteAllBytesAsync(_fileProvider.Combine(pathTo3dObjects, uploadedName), fileBinary);
+
+        var product3dObject = new Product3dObject
+        {
+            ProductId = product.Id,
+            FileName = uploadedName,
+        };
+
+        await _productService.InsertProduct3dObjectAsync(product3dObject);
+
+        return Json(new
+        {
+            success = true,
+            fileUrl = product3dObject.FileName,
+            objectId = product3dObject.Id
+        });
     }
 
     #endregion

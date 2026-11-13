@@ -175,5 +175,15 @@ public static partial class NopCustomerDefaults
     /// </summary>
     public static string CloseConfigurationStepsAttribute => "CloseConfigurationSteps";
 
+    /// <summary>
+    /// Gets the name of the generic attribute used to store OTP-related information
+    /// </summary>
+    public static string OtpContextAttribute => "OtpContext";
+
+    /// <summary>
+    /// Gets a name of generic attribute to store the value of 'ShoppingCartVendor'
+    /// </summary>
+    public static string ShoppingCartVendorAttribute => "ShoppingCartVendor";
+
     #endregion
 }
